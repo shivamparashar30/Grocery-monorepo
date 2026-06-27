@@ -1,0 +1,20 @@
+{
+  "name": "grocery-app-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Grocery App - Monorepo for Frontend (React Native) and Backend (Node.js/Express)",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "backend:dev": "npm run dev -w packages/backend",
+    "backend:start": "npm run start -w packages/backend",
+    "frontend:android": "npm run android -w packages/frontend",
+    "frontend:ios": "npm run ios -w packages/frontend",
+    "frontend:start": "npm run start -w packages/frontend",
+    "install:all": "npm install"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

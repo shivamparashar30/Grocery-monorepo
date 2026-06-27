@@ -1,0 +1,11 @@
+{
+  "name": "GroceryApp",
+  "displayName": "GroceryApp",
+  "plugins":[
+    [
+      {
+        "assetsPaths":["./assets/animations"]
+      }
+    ]
+  ]
+}
