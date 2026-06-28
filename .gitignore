@@ -6,6 +6,10 @@ node_modules/
 .env.local
 .env.*.local
 
+# Firebase service account (secret)
+packages/backend/config/firebase-service-account.json
+packages/backend/config/grocery-app-*-firebase-adminsdk-*.json
+
 # OS files
 .DS_Store
 Thumbs.db
