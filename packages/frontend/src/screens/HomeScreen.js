@@ -118,15 +118,15 @@ const BannerCard = ({ item, width, onPress }) => (
 );
 
 const ProductCard = ({ item, cardWidth }) => {
-  const { addItem } = useCart();
+  const { cart, addItem, removeItem } = useCart();
   const { isInWishlist, toggleWishlist } = useWishlist();
-  const [added, setAdded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const localImg = IMAGE_MAP[item.productKey];
   const hasUrl = !imgError && item.imageUrl;
   const imageSource = localImg || (hasUrl ? { uri: item.imageUrl } : null);
   const wishlisted = isInWishlist(item.productKey || item._id);
   const placeholderBg = getPlaceholderColor(item.name);
+  const qty = cart[item._id] || 0;
   return (
     <View style={[s.productCard, { width: cardWidth }]}>
       <View style={[s.productImgWrap, { backgroundColor: imageSource ? '#F7F6F2' : placeholderBg + '20' }]}>
@@ -158,15 +158,25 @@ const ProductCard = ({ item, cardWidth }) => {
           <Text style={s.productPrice}>Rs.{item.price}</Text>
           <Text style={s.productUnit}>{item.unit}</Text>
         </View>
-        <TouchableOpacity
-          style={[s.addBtn, added && s.addBtnActive]}
-          onPress={() => { addItem(item); setAdded(true); setTimeout(() => setAdded(false), 1200); }}
-          activeOpacity={0.8}
-        >
-          <Text style={[s.addBtnText, added && s.addBtnTextActive]}>
-            {added ? 'ADDED' : 'ADD'}
-          </Text>
-        </TouchableOpacity>
+        {qty > 0 ? (
+          <View style={s.qtyRow}>
+            <TouchableOpacity style={s.qtyBtn} onPress={() => removeItem(item._id)} activeOpacity={0.7}>
+              <Icon name="remove" size={16} color="#fff" />
+            </TouchableOpacity>
+            <Text style={s.qtyText}>{qty}</Text>
+            <TouchableOpacity style={s.qtyBtn} onPress={() => addItem(item)} activeOpacity={0.7}>
+              <Icon name="add" size={16} color="#fff" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={s.addBtn}
+            onPress={() => addItem(item)}
+            activeOpacity={0.8}
+          >
+            <Text style={s.addBtnText}>ADD</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -484,6 +494,8 @@ const HomeScreen = ({ onTabSwitch }) => {
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [selectedAddress, setSelectedAddress] = useState(null);
+  const [homeSections, setHomeSections] = useState([]);
+  const [sectionsLoading, setSectionsLoading] = useState(true);
 
   const snowAnims = useRef(
     Array.from({ length: SNOW_ANIMS_COUNT }, () => new Animated.Value(0))
@@ -545,6 +557,38 @@ const HomeScreen = ({ onTabSwitch }) => {
     })();
   }, []);
 
+  // ── Fetch dynamic home sections from API ─────────────────────────────
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${BASE_URL}/home-sections`);
+        const data = await res.json();
+        if (data.success) {
+          setHomeSections(
+            data.data.map((sec) => ({
+              _id: sec._id,
+              title: sec.title,
+              subtitle: sec.subtitle,
+              products: (sec.products || []).map((p) => ({
+                _id: p._id,
+                productKey: p.productKey,
+                name: p.name,
+                price: p.price,
+                unit: p.unit,
+                badge: p.badge,
+                imageUrl: p.imageUrl,
+              })),
+            }))
+          );
+        }
+      } catch (e) {
+        console.error('Failed to fetch home sections:', e);
+      } finally {
+        setSectionsLoading(false);
+      }
+    })();
+  }, []);
+
   // ── Handlers ───────────────────────────────────────────────────────────────
   const handleCategoryPress = useCallback((name) => {
     if (selectedCategory === name) return;
@@ -583,8 +627,7 @@ const HomeScreen = ({ onTabSwitch }) => {
   const productW       = Math.min(width * 0.42, 165);
   const freqCardW      = (width - 48) / 2;
 
-  const categoryProducts = CATEGORY_PRODUCTS[selectedCategory] || [];
-  const sectionTitles    = CATEGORY_SECTION_TITLES[selectedCategory];
+  // Category-specific data removed — now fully API-driven
 
   const SNOW_POSITIONS = ['8%', '22%', '38%', '55%', '72%', '88%'];
   const SNOW_SIZES     = [12, 16, 13, 11, 15, 12];
@@ -701,31 +744,39 @@ const HomeScreen = ({ onTabSwitch }) => {
           </View>
         )}
 
-        {/* ── ALL TAB: Multiple sections ── */}
-        {isAll && ALL_PRODUCTS_SECTIONS.map((sec, idx) => (
-          <View key={`all-sec-${idx}`} style={s.section}>
+        {/* ── Dynamic sections from API ── */}
+        {isAll && homeSections.map((sec) => (
+          <View key={sec._id} style={s.section}>
             <SectionHeader title={sec.title} subtitle={sec.subtitle} onSeeAll={() => onTabSwitch?.('Categories')} />
             <FlatList data={sec.products} renderItem={({ item }) => <ProductCard item={item} cardWidth={productW} />}
               keyExtractor={i => i._id} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.productScroll} />
           </View>
         ))}
 
-        {/* ── CATEGORY TABS: Two product rows ── */}
-        {!isAll && categoryProducts.length > 0 && sectionTitles && (
-          <>
-            <View style={s.section}>
-              <SectionHeader title={sectionTitles.first} subtitle={sectionTitles.firstSub} onSeeAll={() => onTabSwitch?.('Categories')} />
-              <FlatList data={categoryProducts.slice(0, 6)} renderItem={({ item }) => <ProductCard item={item} cardWidth={productW} />}
-                keyExtractor={i => i._id} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.productScroll} />
-            </View>
-            {categoryProducts.length > 6 && (
-              <View style={s.section}>
-                <SectionHeader title={sectionTitles.second} subtitle={sectionTitles.secondSub} />
-                <FlatList data={categoryProducts.slice(6)} renderItem={({ item }) => <ProductCard item={item} cardWidth={productW} />}
-                  keyExtractor={i => i._id + '_2'} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.productScroll} />
-              </View>
-            )}
-          </>
+        {/* Fallback: show hardcoded sections while API loads */}
+        {isAll && sectionsLoading && ALL_PRODUCTS_SECTIONS.slice(0, 3).map((sec, idx) => (
+          <View key={`fallback-${idx}`} style={s.section}>
+            <SectionHeader title={sec.title} subtitle={sec.subtitle} />
+            <FlatList data={sec.products} renderItem={({ item }) => <ProductCard item={item} cardWidth={productW} />}
+              keyExtractor={i => i._id} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.productScroll} />
+          </View>
+        ))}
+
+        {/* ── CATEGORY TABS: Navigate to category screen ── */}
+        {!isAll && (
+          <View style={s.section}>
+            <TouchableOpacity
+              style={s.categoryViewAll}
+              onPress={() => onTabSwitch?.('Categories')}
+              activeOpacity={0.8}
+            >
+              <Icon name="grid-outline" size={24} color={accent} />
+              <Text style={[s.categoryViewAllText, { color: accent }]}>
+                View all {selectedCategory} products
+              </Text>
+              <Icon name="arrow-forward" size={18} color={accent} />
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* Frequently bought — All only */}
@@ -823,9 +874,10 @@ const s = StyleSheet.create({
   productPrice: { fontSize: 15, fontWeight: '700', color: COLORS.ink },
   productUnit: { fontSize: 11, color: COLORS.textMuted },
   addBtn: { height: 32, borderRadius: 9, borderWidth: 1.5, borderColor: COLORS.green, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' },
-  addBtnActive: { backgroundColor: COLORS.green },
   addBtnText: { fontSize: 12, fontWeight: '800', color: COLORS.green, letterSpacing: 0.5 },
-  addBtnTextActive: { color: '#FFFFFF' },
+  qtyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 32, borderRadius: 9, backgroundColor: COLORS.green, overflow: 'hidden' },
+  qtyBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  qtyText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF', minWidth: 20, textAlign: 'center' },
   freqGrid: { gap: 8 },
   freqRow: { flexDirection: 'row', justifyContent: 'space-between' },
   freqCard: { backgroundColor: COLORS.card, borderRadius: 16, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 10, borderWidth: 0.5, borderColor: COLORS.border, position: 'relative' },
@@ -844,6 +896,14 @@ const s = StyleSheet.create({
   promoSub: { fontSize: 11.5, color: '#A08030', fontWeight: '400' },
   promoActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   promoClose: { padding: 4 },
+  categoryViewAll: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 10, backgroundColor: '#fff', borderRadius: 14, paddingVertical: 20,
+    marginHorizontal: 16, marginTop: 16,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06, shadowRadius: 4, elevation: 2,
+  },
+  categoryViewAllText: { fontSize: 15, fontWeight: '700' },
   bottomPad: { height: 32 },
 });
 

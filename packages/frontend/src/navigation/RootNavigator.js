@@ -1,19 +1,25 @@
 
-
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
 import { useSelector } from 'react-redux';
 
 import AuthNavigator from './AuthNavigator';
-import AppNavigator from './AppNavigator';           // existing user navigator
-import AdminNavigator from './AdminNavigator';       // new
-import DriverNavigator from './DriverNavigator';     // new
+import AppNavigator from './AppNavigator';
+import AdminNavigator from './AdminNavigator';
+import DriverNavigator from './DriverNavigator';
+import { navigationRef } from './navigationRef';
+import FloatingCart from '../components/FloatingCart';
 
 const RootNavigator = () => {
   const { isAuthenticated, isInitialized } = useSelector((state) => state.auth);
-  // Role lives in userSlice (set via setUserData after login)
   const role = useSelector((state) => state.user?.data?.role);
+  const [currentRoute, setCurrentRoute] = useState('');
+
+  const onStateChange = useCallback(() => {
+    const route = navigationRef.current?.getCurrentRoute();
+    setCurrentRoute(route?.name ?? '');
+  }, []);
 
   if (!isInitialized) {
     return (
@@ -23,18 +29,20 @@ const RootNavigator = () => {
     );
   }
 
-  // Pick the right navigator based on role
+  const isUser = isAuthenticated && (!role || role === 'user');
+
   const getAppNavigator = () => {
     switch (role) {
       case 'admin':  return <AdminNavigator />;
       case 'driver': return <DriverNavigator />;
-      default:       return <AppNavigator />;   // 'user' or fallback
+      default:       return <AppNavigator />;
     }
   };
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef} onStateChange={onStateChange}>
       {isAuthenticated ? getAppNavigator() : <AuthNavigator />}
+      {isUser && <FloatingCart currentRoute={currentRoute} />}
     </NavigationContainer>
   );
 };

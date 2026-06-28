@@ -1,6 +1,7 @@
 const Notification = require('../models/notificationSchema');
 const asyncHandler = require('../middleware/async');
 const ErrorResponse = require('../utils/errorResponse');
+const { sendPushNotification } = require('../services/firebaseService');
 
 // @desc    Get all notifications for logged in user
 // @route   GET /api/v1/notifications
@@ -88,11 +89,11 @@ exports.createNotification = asyncHandler(async (req, res, next) => {
 exports.broadcastNotification = asyncHandler(async (req, res, next) => {
   const { type, title, message, image, actionUrl, priority } = req.body;
 
-  // Get all users
+  // Get all users with their FCM tokens
   const User = require('../models/user');
-  const users = await User.find({ isActive: true }).select('_id');
+  const users = await User.find({ isActive: true }).select('_id fcmTokens');
 
-  // Create notification for each user
+  // Create in-app notification for each user
   const notifications = users.map((user) => ({
     user: user._id,
     type,
@@ -104,6 +105,25 @@ exports.broadcastNotification = asyncHandler(async (req, res, next) => {
   }));
 
   await Notification.insertMany(notifications);
+
+  // Send FCM push notifications
+  const allTokens = users.reduce((tokens, user) => {
+    if (user.fcmTokens && user.fcmTokens.length > 0) {
+      tokens.push(...user.fcmTokens);
+    }
+    return tokens;
+  }, []);
+
+  if (allTokens.length > 0) {
+    try {
+      await sendPushNotification(allTokens, title, message, {
+        type: type || 'general',
+        priority: priority || 'medium',
+      });
+    } catch (err) {
+      console.error('FCM broadcast error (notifications still saved):', err.message);
+    }
+  }
 
   res.status(201).json({
     success: true,

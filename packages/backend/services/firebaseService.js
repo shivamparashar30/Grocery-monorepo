@@ -10,30 +10,26 @@ const initializeFirebase = () => {
   }
 
   try {
-    // For local development - use service account file if it exists
-    if (process.env.NODE_ENV === 'development') {
-      try {
-        const serviceAccount = require('../config/firebase-service-account.json');
+    // Try service account file first (works in any environment)
+    try {
+      const serviceAccount = require('../config/firebase-service-account.json');
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+      });
+    } catch (fileError) {
+      // Fallback to environment variables (production/Vercel)
+      if (process.env.FIREBASE_PROJECT_ID) {
         admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
+          credential: admin.credential.cert({
+            projectId: process.env.FIREBASE_PROJECT_ID,
+            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+            privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+          }),
         });
-      } catch (fileError) {
-        console.warn('Firebase service account file not found. Push notifications will be disabled.');
+      } else {
+        console.warn('Firebase credentials not configured. Push notifications will be disabled.');
         return;
       }
-    }
-    // For production (Vercel) - use environment variables
-    else if (process.env.FIREBASE_PROJECT_ID) {
-      admin.initializeApp({
-        credential: admin.credential.cert({
-          projectId: process.env.FIREBASE_PROJECT_ID,
-          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-          privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-        }),
-      });
-    } else {
-      console.warn('Firebase credentials not configured. Push notifications will be disabled.');
-      return;
     }
     
     firebaseInitialized = true;

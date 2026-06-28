@@ -1,379 +1,593 @@
-// screens/admin/AdminHomescreen.js
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  SafeAreaView,
   StatusBar,
+  RefreshControl,
+  ActivityIndicator,
+  Dimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { logoutUser } from '../../store/slices/authSlice';
 import { clearUserData } from '../../store/slices/userSlice';
 import { fetchAllDrivers } from '../../store/slices/driversSlice';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Icon from 'react-native-vector-icons/Ionicons';
+import LinearGradient from 'react-native-linear-gradient';
+import { BASE_URL } from '../../config/apiconfig';
 
-// ─── StatCard ─────────────────────────────────────────────────────────────────
-const StatCard = ({ icon, label, value, color, onPress }) => (
-  <TouchableOpacity
-    style={[styles.statCard, { borderLeftColor: color }]}
-    onPress={onPress}
-    activeOpacity={onPress ? 0.7 : 1}
-    disabled={!onPress}
-  >
-    <Text style={styles.statIcon}>{icon}</Text>
+const { width } = Dimensions.get('window');
+const CARD_W = (width - 48 - 12) / 2;
+
+const STATS_API = `${BASE_URL}/home-sections/admin/stats`;
+
+const getGreeting = () => {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good Morning';
+  if (h < 17) return 'Good Afternoon';
+  return 'Good Evening';
+};
+
+// ── Stat Card ────────────────────────────────────────────────────────────────
+const StatCard = ({ icon, iconColor, iconBg, label, value, sub }) => (
+  <View style={styles.statCard}>
+    <View style={[styles.statIconWrap, { backgroundColor: iconBg }]}>
+      <Icon name={icon} size={20} color={iconColor} />
+    </View>
     <Text style={styles.statValue}>{value}</Text>
     <Text style={styles.statLabel}>{label}</Text>
-  </TouchableOpacity>
+    {sub ? <Text style={styles.statSub}>{sub}</Text> : null}
+  </View>
 );
 
-// ─── QuickAction ──────────────────────────────────────────────────────────────
-const QuickAction = ({ icon, label, onPress, color }) => (
-  <TouchableOpacity
-    style={[styles.quickAction, { backgroundColor: color + '15' }]}
-    onPress={onPress}
-    activeOpacity={0.7}
-  >
-    <View style={[styles.quickActionIcon, { backgroundColor: color }]}>
-      <Text style={styles.quickActionEmoji}>{icon}</Text>
+// ── Quick Action ─────────────────────────────────────────────────────────────
+const QuickAction = ({ icon, label, color, onPress }) => (
+  <TouchableOpacity style={styles.quickAction} onPress={onPress} activeOpacity={0.7}>
+    <View style={[styles.quickIcon, { backgroundColor: color + '15' }]}>
+      <Icon name={icon} size={20} color={color} />
     </View>
-    <Text style={styles.quickActionLabel}>{label}</Text>
+    <Text style={styles.quickLabel}>{label}</Text>
+    <Icon name="chevron-forward" size={14} color="#CBD5E1" />
   </TouchableOpacity>
 );
 
-// ─── Main screen ──────────────────────────────────────────────────────────────
+// ── Low Stock Item ───────────────────────────────────────────────────────────
+const LowStockItem = ({ product }) => (
+  <View style={styles.lowStockItem}>
+    <View style={styles.lowStockLeft}>
+      <View style={styles.lowStockBadge}>
+        <Text style={styles.lowStockKey}>{product.productKey?.toUpperCase()}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.lowStockName} numberOfLines={1}>{product.name}</Text>
+        <Text style={styles.lowStockPrice}>Rs. {product.price}</Text>
+      </View>
+    </View>
+    <View style={[
+      styles.stockPill,
+      { backgroundColor: product.stock === 0 ? '#FEE2E2' : '#FEF3C7' },
+    ]}>
+      <Text style={[
+        styles.stockPillText,
+        { color: product.stock === 0 ? '#DC2626' : '#D97706' },
+      ]}>
+        {product.stock === 0 ? 'Out of stock' : `${product.stock} left`}
+      </Text>
+    </View>
+  </View>
+);
+
+// ── Recent Order ─────────────────────────────────────────────────────────────
+const STATUS_COLOR = {
+  pending: '#F59E0B',
+  confirmed: '#3B82F6',
+  processing: '#8B5CF6',
+  shipped: '#06B6D4',
+  delivered: '#22C55E',
+  cancelled: '#EF4444',
+};
+
+const RecentOrder = ({ order }) => {
+  const statusColor = STATUS_COLOR[order.status] || '#94A3B8';
+  const date = new Date(order.createdAt);
+  const timeAgo = getTimeAgo(date);
+
+  return (
+    <View style={styles.orderItem}>
+      <View style={[styles.orderDot, { backgroundColor: statusColor }]} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.orderCustomer} numberOfLines={1}>
+          {order.user?.name || 'Customer'}
+        </Text>
+        <Text style={styles.orderMeta}>
+          {order.orderItems?.length || 0} items · {timeAgo}
+        </Text>
+      </View>
+      <View>
+        <Text style={styles.orderAmount}>Rs. {order.totalPrice?.toFixed(0) || 0}</Text>
+        <View style={[styles.orderStatus, { backgroundColor: statusColor + '18' }]}>
+          <Text style={[styles.orderStatusText, { color: statusColor }]}>
+            {order.status}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const getTimeAgo = (date) => {
+  const diff = Date.now() - date.getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+};
+
+// ── Main ─────────────────────────────────────────────────────────────────────
 const AdminHomescreen = ({ navigation }) => {
   const dispatch = useDispatch();
-  const { data: user }       = useSelector((state) => state.user);
-  const { all: allDrivers }  = useSelector((state) => state.drivers);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const { data: user } = useSelector((s) => s.user);
+  const { all: allDrivers } = useSelector((s) => s.drivers);
 
-  // Fetch drivers on mount so the stat card shows a live count
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const res = await fetch(STATS_API, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) setStats(data.data);
+    } catch (err) {
+      console.error('Dashboard stats error:', err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
   useEffect(() => {
+    fetchStats();
     dispatch(fetchAllDrivers());
   }, []);
 
-  const handleLogout = async () => {
-    await dispatch(logoutUser());
-    dispatch(clearUserData());
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchStats();
+    dispatch(fetchAllDrivers({ refresh: true }));
+  }, []);
+
+  const onlineDrivers = allDrivers.filter((d) => d.isAvailable && !d.isBlocked).length;
+
+  const formatCurrency = (n) => {
+    if (!n) return 'Rs. 0';
+    if (n >= 100000) return `Rs. ${(n / 100000).toFixed(1)}L`;
+    if (n >= 1000) return `Rs. ${(n / 1000).toFixed(1)}K`;
+    return `Rs. ${n}`;
   };
 
-  // ── Live driver counts derived from Redux state ──
-  const onlineDriverCount  = allDrivers.filter((d) => d.isAvailable && !d.isBlocked).length;
-  const totalDriverCount   = allDrivers.length;
-
-  // ── Stats — "Active Drivers" is now live ──────────────────────────────────
-  const stats = [
-    { icon: '👥', label: 'Total Users',    value: '1,284',           color: '#4CAF50' },
-    {
-      icon: '🚗',
-      label: 'Active Drivers',
-      value: allDrivers.length > 0
-        ? `${onlineDriverCount}/${totalDriverCount}`
-        : '—',
-      color: '#2196F3',
-      onPress: () => navigation.navigate('AdminDrivers'),
-    },
-    { icon: '📦', label: 'Orders Today',   value: '319',             color: '#FF9800' },
-    { icon: '💰', label: 'Revenue',        value: '₹84K',            color: '#9C27B0' },
-  ];
-
-  const quickActions = [
-    { icon: '➕', label: 'Add Driver',  color: '#4CAF50', onPress: () => navigation.navigate('RegisterDriver') },
-    { icon: '📋', label: 'All Orders',  color: '#2196F3', onPress: () => navigation.navigate('AdminOrders') },
-    { icon: '👤', label: 'Users',       color: '#FF9800', onPress: () => navigation.navigate('AdminUsers') },
-    { icon: '🚚', label: 'Drivers',     color: '#9C27B0', onPress: () => navigation.navigate('AdminDrivers') },
-    { icon: '🏪', label: 'Products',    color: '#F44336', onPress: () => navigation.navigate('AdminProducts') },
-    { icon: '📊', label: 'Analytics',   color: '#00BCD4', onPress: () => navigation.navigate('AdminAnalytics') },
-  ];
-
-  const recentActivity = [
-    { id: 1, icon: '🆕', text: 'New user registered: Priya Sharma',   time: '2 min ago',  color: '#4CAF50' },
-    { id: 2, icon: '🚗', text: 'Driver Rahul went online',             time: '5 min ago',  color: '#2196F3' },
-    { id: 3, icon: '📦', text: 'Order #4821 delivered successfully',   time: '12 min ago', color: '#FF9800' },
-    { id: 4, icon: '⚠️', text: 'Order #4818 delivery delayed',         time: '18 min ago', color: '#F44336' },
-    { id: 5, icon: '💰', text: 'Payment received ₹1,240',              time: '25 min ago', color: '#9C27B0' },
-  ];
-
-  // ── Bottom nav tab press ──────────────────────────────────────────────────
-  const handleTabPress = (tabId) => {
-    setActiveTab(tabId);
-    if (tabId === 'drivers') navigation.navigate('AdminDrivers');
-    if (tabId === 'orders')  navigation.navigate('AdminOrders');
-  };
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" translucent />
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color="#6C5CE7" />
+          <Text style={styles.loadingText}>Loading dashboard...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+    <SafeAreaView style={[styles.container, { backgroundColor: '#1E1B4B' }]} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor="#1E1B4B" translucent />
 
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.adminBadge}>
-            <Text style={styles.adminBadgeText}>ADMIN</Text>
+      <ScrollView
+        style={{ backgroundColor: '#F8FAFC' }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#6C5CE7" />
+        }
+      >
+        {/* ── Gradient Header ── */}
+        <LinearGradient colors={['#1E1B4B', '#312E81']} style={styles.header}>
+          <View style={styles.headerTop}>
+            <View>
+              <Text style={styles.greeting}>{getGreeting()}</Text>
+              <Text style={styles.adminName}>{user?.name || 'Admin'}</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.notifBtn}
+              onPress={() => navigation.navigate('AdminNotifications')}
+              activeOpacity={0.7}
+            >
+              <Icon name="notifications-outline" size={22} color="#fff" />
+              <View style={styles.notifDot} />
+            </TouchableOpacity>
           </View>
-          <View>
-            <Text style={styles.greeting}>Good morning 👋</Text>
-            <Text style={styles.adminName}>{user?.name || 'Administrator'}</Text>
-          </View>
-        </View>
-        <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
-      </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-
-        {/* ── Driver status banner (shown when drivers are loaded) ── */}
-        {allDrivers.length > 0 && (
-          <TouchableOpacity
-            style={styles.driverBanner}
-            onPress={() => navigation.navigate('AdminDrivers')}
-            activeOpacity={0.8}
-          >
-            <View style={styles.driverBannerLeft}>
-              <Text style={styles.driverBannerTitle}>🟢 Live Driver Status</Text>
-              <Text style={styles.driverBannerSub}>
-                {onlineDriverCount} online · {totalDriverCount - onlineDriverCount} offline
-                {allDrivers.filter((d) => d.isBlocked).length > 0
-                  ? ` · ${allDrivers.filter((d) => d.isBlocked).length} blocked`
-                  : ''}
+          {/* ── Live Driver Strip ── */}
+          {allDrivers.length > 0 && (
+            <TouchableOpacity
+              style={styles.driverStrip}
+              onPress={() => navigation.navigate('RidersTab')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.driverStripDot} />
+              <Text style={styles.driverStripText}>
+                {onlineDrivers} rider{onlineDrivers !== 1 ? 's' : ''} online
               </Text>
-            </View>
-            <View style={styles.driverBannerRight}>
-              <Text style={styles.driverBannerCta}>Manage →</Text>
-            </View>
-          </TouchableOpacity>
-        )}
+              <Text style={styles.driverStripSep}>·</Text>
+              <Text style={styles.driverStripText}>
+                {allDrivers.length} total
+              </Text>
+              <Icon name="chevron-forward" size={14} color="#A5B4FC" style={{ marginLeft: 'auto' }} />
+            </TouchableOpacity>
+          )}
+        </LinearGradient>
 
-        {/* ── Stats Row ── */}
-        <Text style={styles.sectionTitle}>Today's Overview</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.statsRow}>
-          {stats.map((s, i) => (
-            <StatCard key={i} {...s} />
-          ))}
-        </ScrollView>
+        {/* ── Stats Grid ── */}
+        <View style={styles.statsGrid}>
+          <StatCard
+            icon="people"
+            iconColor="#6C5CE7"
+            iconBg="#EDE9FE"
+            label="Customers"
+            value={stats?.userCount ?? 0}
+          />
+          <StatCard
+            icon="cube"
+            iconColor="#3B82F6"
+            iconBg="#DBEAFE"
+            label="Products"
+            value={stats?.productCount ?? 0}
+          />
+          <StatCard
+            icon="receipt"
+            iconColor="#F59E0B"
+            iconBg="#FEF3C7"
+            label="Orders"
+            value={stats?.orderCount ?? 0}
+          />
+          <StatCard
+            icon="wallet"
+            iconColor="#22C55E"
+            iconBg="#DCFCE7"
+            label="Revenue"
+            value={formatCurrency(stats?.revenue)}
+          />
+        </View>
 
         {/* ── Quick Actions ── */}
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.quickActionsGrid}>
-          {quickActions.map((a, i) => (
-            <QuickAction key={i} {...a} />
-          ))}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <View style={styles.quickGrid}>
+            <QuickAction
+              icon="layers-outline"
+              label="Home Sections"
+              color="#E91E63"
+              onPress={() => navigation.navigate('AdminSections')}
+            />
+            <QuickAction
+              icon="person-add-outline"
+              label="Add Rider"
+              color="#22C55E"
+              onPress={() => navigation.navigate('RegisterDriver')}
+            />
+            <QuickAction
+              icon="people-outline"
+              label="Customers"
+              color="#3B82F6"
+              onPress={() => navigation.navigate('AdminUsers')}
+            />
+            <QuickAction
+              icon="bar-chart-outline"
+              label="Analytics"
+              color="#8B5CF6"
+              onPress={() => navigation.navigate('AdminAnalytics')}
+            />
+          </View>
         </View>
 
-        {/* ── Recent Activity ── */}
-        <Text style={styles.sectionTitle}>Recent Activity</Text>
-        <View style={styles.activityCard}>
-          {recentActivity.map((item) => (
-            <View key={item.id} style={styles.activityItem}>
-              <View style={[styles.activityDot, { backgroundColor: item.color }]}>
-                <Text style={styles.activityDotIcon}>{item.icon}</Text>
-              </View>
-              <View style={styles.activityText}>
-                <Text style={styles.activityDescription}>{item.text}</Text>
-                <Text style={styles.activityTime}>{item.time}</Text>
+        {/* ── Low Stock Alert ── */}
+        {stats?.lowStockProducts?.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Low Stock Alert</Text>
+              <View style={styles.alertBadge}>
+                <Icon name="alert-circle" size={12} color="#DC2626" />
+                <Text style={styles.alertBadgeText}>{stats.lowStockProducts.length}</Text>
               </View>
             </View>
-          ))}
-        </View>
+            <View style={styles.lowStockCard}>
+              {stats.lowStockProducts.slice(0, 5).map((p) => (
+                <LowStockItem key={p._id} product={p} />
+              ))}
+            </View>
+          </View>
+        )}
 
-        <View style={{ height: 30 }} />
-      </ScrollView>
+        {/* ── Recent Orders ── */}
+        {stats?.recentOrders?.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Recent Orders</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('OrdersTab')}>
+                <Text style={styles.seeAll}>See all</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.ordersCard}>
+              {stats.recentOrders.map((o) => (
+                <RecentOrder key={o._id} order={o} />
+              ))}
+            </View>
+          </View>
+        )}
 
-      {/* ── Bottom Nav ── */}
-      <View style={styles.bottomNav}>
-        {[
-          { id: 'dashboard', icon: '🏠', label: 'Dashboard' },
-          { id: 'orders',    icon: '📦', label: 'Orders'    },
-          { id: 'drivers',   icon: '🚗', label: 'Drivers'   },
-          { id: 'settings',  icon: '⚙️', label: 'Settings'  },
-        ].map((tab) => (
-          <TouchableOpacity
-            key={tab.id}
-            style={styles.navTab}
-            onPress={() => handleTabPress(tab.id)}
-          >
-            <View>
-              <Text style={[styles.navIcon, activeTab === tab.id && styles.navIconActive]}>
-                {tab.icon}
-              </Text>
-              {/* Live indicator dot on Drivers tab */}
-              {tab.id === 'drivers' && onlineDriverCount > 0 && (
-                <View style={styles.navBadge}>
-                  <Text style={styles.navBadgeText}>{onlineDriverCount}</Text>
+        {/* ── Order Status Breakdown ── */}
+        {stats?.ordersByStatus?.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Order Status</Text>
+            <View style={styles.statusCard}>
+              {stats.ordersByStatus.map((s) => (
+                <View key={s._id} style={styles.statusRow}>
+                  <View style={[styles.statusDot, { backgroundColor: STATUS_COLOR[s._id] || '#94A3B8' }]} />
+                  <Text style={styles.statusLabel}>{s._id || 'unknown'}</Text>
+                  <View style={styles.statusBarTrack}>
+                    <View
+                      style={[
+                        styles.statusBarFill,
+                        {
+                          backgroundColor: STATUS_COLOR[s._id] || '#94A3B8',
+                          width: `${Math.min((s.count / (stats?.orderCount || 1)) * 100, 100)}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.statusCount}>{s.count}</Text>
                 </View>
-              )}
+              ))}
             </View>
-            <Text style={[styles.navLabel, activeTab === tab.id && styles.navLabelActive]}>
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+          </View>
+        )}
+
+        <View style={{ height: 24 }} />
+      </ScrollView>
     </SafeAreaView>
   );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f4f8' },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingText: { color: '#64748B', fontSize: 14 },
 
   // Header
-  header: {
-    backgroundColor: '#1a1a2e',
-    paddingHorizontal: 20,
-    paddingVertical: 20,
+  header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 20 },
+  headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 16,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  adminBadge: {
-    backgroundColor: '#e94560',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  adminBadgeText: { color: '#fff', fontSize: 10, fontWeight: 'bold', letterSpacing: 1 },
-  greeting: { color: '#94a3b8', fontSize: 13 },
-  adminName: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  logoutBtn: {
-    borderWidth: 1,
-    borderColor: '#e94560',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-  },
-  logoutText: { color: '#e94560', fontSize: 13, fontWeight: '600' },
-
-  // Content
-  content: { flex: 1, paddingHorizontal: 16 },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1a1a2e',
-    marginTop: 20,
-    marginBottom: 12,
-  },
-
-  // Driver banner
-  driverBanner: {
-    marginTop: 16,
-    backgroundColor: '#1a1a2e',
+  greeting: { color: '#A5B4FC', fontSize: 13, fontWeight: '500' },
+  adminName: { color: '#FFFFFF', fontSize: 22, fontWeight: '800', marginTop: 2 },
+  notifBtn: {
+    width: 42,
+    height: 42,
     borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#334155',
-  },
-  driverBannerLeft: { flex: 1 },
-  driverBannerTitle: { color: '#fff', fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  driverBannerSub: { color: '#94a3b8', fontSize: 12 },
-  driverBannerRight: {
-    backgroundColor: '#e94560',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  driverBannerCta: { color: '#fff', fontSize: 12, fontWeight: '700' },
-
-  // Stats
-  statsRow: { marginHorizontal: -4 },
-  statCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 16,
-    marginHorizontal: 6,
-    width: 110,
-    borderLeftWidth: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  statIcon: { fontSize: 22, marginBottom: 8 },
-  statValue: { fontSize: 20, fontWeight: '800', color: '#1a1a2e', marginBottom: 2 },
-  statLabel: { fontSize: 11, color: '#64748b', fontWeight: '500' },
-
-  // Quick actions
-  quickActionsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  quickAction: {
-    width: '30.5%',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  quickActionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 8,
   },
-  quickActionEmoji: { fontSize: 20 },
-  quickActionLabel: { fontSize: 12, fontWeight: '600', color: '#334155', textAlign: 'center' },
+  notifDot: {
+    position: 'absolute',
+    top: 10,
+    right: 11,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#EF4444',
+    borderWidth: 1.5,
+    borderColor: '#312E81',
+  },
 
-  // Activity
-  activityCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+  // Driver strip
+  driverStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    gap: 6,
+  },
+  driverStripDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22C55E',
+  },
+  driverStripText: { color: '#C7D2FE', fontSize: 13, fontWeight: '600' },
+  driverStripSep: { color: '#6366F1', fontSize: 13 },
+
+  // Stats
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 20,
+    gap: 12,
+    marginTop: -10,
+  },
+  statCard: {
+    width: CARD_W,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
     padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 6,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
     elevation: 3,
   },
-  activityItem: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16 },
-  activityDot: {
+  statIconWrap: {
     width: 36,
     height: 36,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginBottom: 12,
   },
-  activityDotIcon: { fontSize: 16 },
-  activityText: { flex: 1 },
-  activityDescription: { fontSize: 13, color: '#334155', fontWeight: '500', marginBottom: 2 },
-  activityTime: { fontSize: 11, color: '#94a3b8' },
+  statValue: { fontSize: 22, fontWeight: '800', color: '#0F172A', marginBottom: 2 },
+  statLabel: { fontSize: 12, color: '#64748B', fontWeight: '500' },
+  statSub: { fontSize: 10, color: '#94A3B8', marginTop: 2 },
 
-  // Bottom nav
-  bottomNav: {
+  // Section
+  section: { paddingHorizontal: 20, marginTop: 24 },
+  sectionHeader: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
-    paddingBottom: 8,
-    paddingTop: 10,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
   },
-  navTab: { flex: 1, alignItems: 'center' },
-  navIcon: { fontSize: 22, marginBottom: 2 },
-  navIconActive: { transform: [{ scale: 1.1 }] },
-  navLabel: { fontSize: 10, color: '#94a3b8', fontWeight: '500' },
-  navLabelActive: { color: '#e94560', fontWeight: '700' },
-  navBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -8,
-    backgroundColor: '#22c55e',
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#0F172A', marginBottom: 12 },
+  seeAll: { fontSize: 13, fontWeight: '600', color: '#6C5CE7' },
+
+  // Quick actions
+  quickGrid: { gap: 8 },
+  quickAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  quickIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 11,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 3,
+    marginRight: 14,
   },
-  navBadgeText: { color: '#fff', fontSize: 9, fontWeight: '800' },
+  quickLabel: { flex: 1, fontSize: 14, fontWeight: '600', color: '#1E293B' },
+
+  // Low stock
+  alertBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  alertBadgeText: { fontSize: 11, fontWeight: '700', color: '#DC2626' },
+  lowStockCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  lowStockItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  lowStockLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 },
+  lowStockBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  lowStockKey: { fontSize: 10, fontWeight: '800', color: '#475569' },
+  lowStockName: { fontSize: 13, fontWeight: '600', color: '#1E293B' },
+  lowStockPrice: { fontSize: 11, color: '#64748B', marginTop: 1 },
+  stockPill: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  stockPillText: { fontSize: 11, fontWeight: '700' },
+
+  // Recent orders
+  ordersCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  orderItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    gap: 10,
+  },
+  orderDot: { width: 8, height: 8, borderRadius: 4 },
+  orderCustomer: { fontSize: 13, fontWeight: '600', color: '#1E293B' },
+  orderMeta: { fontSize: 11, color: '#94A3B8', marginTop: 1 },
+  orderAmount: { fontSize: 14, fontWeight: '700', color: '#0F172A', textAlign: 'right' },
+  orderStatus: { borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 3, alignSelf: 'flex-end' },
+  orderStatusText: { fontSize: 10, fontWeight: '700', textTransform: 'capitalize' },
+
+  // Order Status breakdown
+  statusCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusLabel: {
+    width: 72,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#475569',
+    textTransform: 'capitalize',
+  },
+  statusBarTrack: {
+    flex: 1,
+    height: 6,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  statusBarFill: { height: 6, borderRadius: 3 },
+  statusCount: { width: 28, fontSize: 12, fontWeight: '700', color: '#0F172A', textAlign: 'right' },
 });
 
 export default AdminHomescreen;

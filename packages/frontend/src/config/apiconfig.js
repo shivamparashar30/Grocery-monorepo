@@ -1,8 +1,8 @@
 import { Platform } from 'react-native';
 
 const DEV_CONFIG = {
-  android: 'http://192.168.1.7:8080/api/v1',
-  ios: 'http://192.168.1.7:8080/api/v1',
+  android: 'http://192.168.1.6:8080/api/v1',
+  ios: 'http://192.168.1.6:8080/api/v1',
 
 };
 

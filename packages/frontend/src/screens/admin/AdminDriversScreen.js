@@ -1,10 +1,8 @@
-// screens/admin/AdminDriversScreen.js
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   StatusBar,
   FlatList,
   TouchableOpacity,
@@ -12,85 +10,50 @@ import {
   RefreshControl,
   ActivityIndicator,
   Alert,
-  Animated,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import {
   fetchAllDrivers,
   toggleDriverBlockStatus,
   clearDriversError,
 } from '../../store/slices/driversSlice';
+import Icon from 'react-native-vector-icons/Ionicons';
 
-// ─── constants ────────────────────────────────────────────────────────────────
 const FILTERS = [
-  { id: 'all',      label: 'All'      },
-  { id: 'online',   label: 'Online'   },
-  { id: 'offline',  label: 'Offline'  },
-  { id: 'blocked',  label: 'Blocked'  },
+  { id: 'all', label: 'All' },
+  { id: 'online', label: 'Online' },
+  { id: 'offline', label: 'Offline' },
+  { id: 'blocked', label: 'Blocked' },
 ];
 
 const VEHICLE_ICONS = {
-  bike:    '🏍️',
-  scooter: '🛵',
-  car:     '🚗',
-  van:     '🚐',
+  bike: 'bicycle',
+  scooter: 'bicycle',
+  car: 'car-sport',
+  van: 'bus',
 };
 
-// ─── StatusPill ───────────────────────────────────────────────────────────────
+// ── Status Pill ──────────────────────────────────────────────────────────────
 const StatusPill = ({ isAvailable, isBlocked }) => {
-  if (isBlocked) {
-    return (
-      <View style={[styles.pill, styles.pillBlocked]}>
-        <View style={[styles.pillDot, { backgroundColor: '#ef4444' }]} />
-        <Text style={[styles.pillText, { color: '#ef4444' }]}>Blocked</Text>
-      </View>
-    );
-  }
-  if (isAvailable) {
-    return (
-      <View style={[styles.pill, styles.pillOnline]}>
-        <View style={[styles.pillDot, { backgroundColor: '#22c55e' }]} />
-        <Text style={[styles.pillText, { color: '#22c55e' }]}>Online</Text>
-      </View>
-    );
-  }
+  const config = isBlocked
+    ? { color: '#DC2626', bg: '#FEE2E2', label: 'Blocked' }
+    : isAvailable
+    ? { color: '#16A34A', bg: '#DCFCE7', label: 'Online' }
+    : { color: '#94A3B8', bg: '#F1F5F9', label: 'Offline' };
+
   return (
-    <View style={[styles.pill, styles.pillOffline]}>
-      <View style={[styles.pillDot, { backgroundColor: '#94a3b8' }]} />
-      <Text style={[styles.pillText, { color: '#94a3b8' }]}>Offline</Text>
+    <View style={[styles.pill, { backgroundColor: config.bg }]}>
+      <View style={[styles.pillDot, { backgroundColor: config.color }]} />
+      <Text style={[styles.pillText, { color: config.color }]}>{config.label}</Text>
     </View>
   );
 };
 
-// ─── SummaryBar ───────────────────────────────────────────────────────────────
-const SummaryBar = ({ all }) => {
-  const online  = all.filter((d) => d.isAvailable && !d.isBlocked).length;
-  const offline = all.filter((d) => !d.isAvailable && !d.isBlocked).length;
-  const blocked = all.filter((d) => d.isBlocked).length;
-
-  const items = [
-    { label: 'Total',   value: all.length, color: '#6366f1', bg: '#eef2ff' },
-    { label: 'Online',  value: online,     color: '#22c55e', bg: '#f0fdf4' },
-    { label: 'Offline', value: offline,    color: '#94a3b8', bg: '#f8fafc' },
-    { label: 'Blocked', value: blocked,    color: '#ef4444', bg: '#fef2f2' },
-  ];
-
-  return (
-    <View style={styles.summaryBar}>
-      {items.map((item) => (
-        <View key={item.label} style={[styles.summaryItem, { backgroundColor: item.bg }]}>
-          <Text style={[styles.summaryValue, { color: item.color }]}>{item.value}</Text>
-          <Text style={styles.summaryLabel}>{item.label}</Text>
-        </View>
-      ))}
-    </View>
-  );
-};
-
-// ─── DriverCard ───────────────────────────────────────────────────────────────
+// ── Driver Card ──────────────────────────────────────────────────────────────
 const DriverCard = ({ driver, onToggleBlock, actionLoading }) => {
   const isActing = actionLoading === driver._id;
-  const vehicleIcon = VEHICLE_ICONS[driver.vehicleType] || '🚗';
+  const vehicleIcon = VEHICLE_ICONS[driver.vehicleType] || 'car-sport';
   const initials = (driver.name || 'D')
     .split(' ')
     .map((w) => w[0])
@@ -99,139 +62,125 @@ const DriverCard = ({ driver, onToggleBlock, actionLoading }) => {
     .slice(0, 2);
 
   const avatarBg = driver.isBlocked
-    ? '#fecaca'
+    ? '#FEE2E2'
     : driver.isAvailable
-    ? '#bbf7d0'
-    : '#e2e8f0';
+    ? '#DCFCE7'
+    : '#F1F5F9';
 
-  const avatarText = driver.isBlocked ? '#dc2626' : driver.isAvailable ? '#16a34a' : '#475569';
+  const avatarColor = driver.isBlocked
+    ? '#DC2626'
+    : driver.isAvailable
+    ? '#16A34A'
+    : '#64748B';
 
   return (
     <View style={[styles.card, driver.isBlocked && styles.cardBlocked]}>
-      {/* Left: avatar + online pulse */}
-      <View style={styles.cardLeft}>
-        <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
-          <Text style={[styles.avatarText, { color: avatarText }]}>{initials}</Text>
+      <View style={styles.cardTop}>
+        <View style={styles.cardLeft}>
+          <View style={[styles.avatar, { backgroundColor: avatarBg }]}>
+            <Text style={[styles.avatarText, { color: avatarColor }]}>{initials}</Text>
+            {driver.isAvailable && !driver.isBlocked && <View style={styles.onlineDot} />}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.driverName} numberOfLines={1}>{driver.name}</Text>
+            <Text style={styles.driverEmail} numberOfLines={1}>{driver.email}</Text>
+          </View>
         </View>
-        {/* Live pulse dot — only when online and not blocked */}
-        {driver.isAvailable && !driver.isBlocked && (
-          <View style={styles.pulseDot} />
+        <StatusPill isAvailable={driver.isAvailable} isBlocked={driver.isBlocked} />
+      </View>
+
+      <View style={styles.metaRow}>
+        {driver.vehicleType && (
+          <View style={styles.metaChip}>
+            <Icon name={vehicleIcon} size={12} color="#6C5CE7" />
+            <Text style={styles.metaText}>{driver.vehicleType}</Text>
+          </View>
+        )}
+        {driver.vehicleNumber && (
+          <View style={styles.metaChip}>
+            <Icon name="card-outline" size={12} color="#6C5CE7" />
+            <Text style={styles.metaText}>{driver.vehicleNumber}</Text>
+          </View>
+        )}
+        {driver.phone && (
+          <View style={styles.metaChip}>
+            <Icon name="call-outline" size={12} color="#6C5CE7" />
+            <Text style={styles.metaText}>{driver.phone}</Text>
+          </View>
         )}
       </View>
 
-      {/* Middle: driver info */}
-      <View style={styles.cardBody}>
-        <View style={styles.cardRow}>
-          <Text style={styles.driverName} numberOfLines={1}>{driver.name}</Text>
-          <StatusPill isAvailable={driver.isAvailable} isBlocked={driver.isBlocked} />
+      <View style={styles.cardBottom}>
+        <View style={styles.statRow}>
+          <View style={styles.statItem}>
+            <Icon name="cube-outline" size={14} color="#64748B" />
+            <Text style={styles.statValue}>{driver.totalDeliveries ?? 0}</Text>
+            <Text style={styles.statLabel}>deliveries</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Icon name="star" size={14} color="#F59E0B" />
+            <Text style={styles.statValue}>{driver.driverRating ?? 0}</Text>
+            <Text style={styles.statLabel}>rating</Text>
+          </View>
         </View>
 
-        <Text style={styles.driverEmail} numberOfLines={1}>{driver.email}</Text>
-
-        <View style={styles.metaRow}>
-          {driver.vehicleType && (
-            <View style={styles.metaChip}>
-              <Text style={styles.metaChipText}>{vehicleIcon} {driver.vehicleType}</Text>
-            </View>
+        <TouchableOpacity
+          style={[
+            styles.blockBtn,
+            driver.isBlocked ? styles.unblockBtn : styles.blockBtnDanger,
+            isActing && { opacity: 0.5 },
+          ]}
+          onPress={() => onToggleBlock(driver)}
+          disabled={isActing}
+          activeOpacity={0.7}
+        >
+          {isActing ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Icon
+                name={driver.isBlocked ? 'checkmark-circle' : 'ban'}
+                size={14}
+                color="#fff"
+              />
+              <Text style={styles.blockBtnText}>
+                {driver.isBlocked ? 'Unblock' : 'Block'}
+              </Text>
+            </>
           )}
-          {driver.vehicleNumber && (
-            <View style={styles.metaChip}>
-              <Text style={styles.metaChipText}>🔢 {driver.vehicleNumber}</Text>
-            </View>
-          )}
-          {driver.phone && (
-            <View style={styles.metaChip}>
-              <Text style={styles.metaChipText}>📱 {driver.phone}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.statsRow}>
-          <Text style={styles.statItem}>
-            📦 <Text style={styles.statBold}>{driver.totalDeliveries ?? 0}</Text> deliveries
-          </Text>
-          <Text style={styles.statItem}>
-            ⭐ <Text style={styles.statBold}>{driver.driverRating ?? 0}</Text> rating
-          </Text>
-        </View>
+        </TouchableOpacity>
       </View>
-
-      {/* Right: block/unblock button */}
-      <TouchableOpacity
-        style={[
-          styles.actionBtn,
-          driver.isBlocked ? styles.actionBtnUnblock : styles.actionBtnBlock,
-          isActing && styles.actionBtnDisabled,
-        ]}
-        onPress={() => onToggleBlock(driver)}
-        disabled={isActing}
-        activeOpacity={0.75}
-      >
-        {isActing ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <Text style={styles.actionBtnText}>
-            {driver.isBlocked ? '✓\nUnblock' : '✕\nBlock'}
-          </Text>
-        )}
-      </TouchableOpacity>
     </View>
   );
 };
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
-const EmptyState = ({ filter, search }) => (
-  <View style={styles.emptyState}>
-    <Text style={styles.emptyIcon}>
-      {search ? '🔍' : filter === 'online' ? '📡' : filter === 'blocked' ? '🚫' : '🚗'}
-    </Text>
-    <Text style={styles.emptyTitle}>
-      {search
-        ? 'No drivers match your search'
-        : filter === 'online'
-        ? 'No drivers online right now'
-        : filter === 'blocked'
-        ? 'No blocked drivers'
-        : 'No drivers registered yet'}
-    </Text>
-    <Text style={styles.emptySubtitle}>
-      {search ? 'Try a different name, email, or vehicle number' : 'Pull down to refresh'}
-    </Text>
-  </View>
-);
-
-// ─── Main screen ──────────────────────────────────────────────────────────────
+// ── Main ─────────────────────────────────────────────────────────────────────
 const AdminDriversScreen = ({ navigation }) => {
   const dispatch = useDispatch();
   const { all, loading, refreshing, error, actionLoading } = useSelector(
-    (state) => state.drivers
+    (s) => s.drivers
   );
 
   const [activeFilter, setActiveFilter] = useState('all');
   const [search, setSearch] = useState('');
 
-  // Initial fetch
-  useEffect(() => {
-    dispatch(fetchAllDrivers());
-  }, []);
+  useEffect(() => { dispatch(fetchAllDrivers()); }, []);
 
-  // Show error alert
   useEffect(() => {
     if (error) {
-      Alert.alert('Error', error, [{ text: 'OK', onPress: () => dispatch(clearDriversError()) }]);
+      Alert.alert('Error', error, [
+        { text: 'OK', onPress: () => dispatch(clearDriversError()) },
+      ]);
     }
   }, [error]);
 
-  // Pull-to-refresh
   const onRefresh = useCallback(() => {
     dispatch(fetchAllDrivers({ refresh: true }));
   }, []);
 
-  // Filter + search
   const displayed = useMemo(() => {
     let list = all;
-
-    if (activeFilter === 'online')  list = list.filter((d) => d.isAvailable && !d.isBlocked);
+    if (activeFilter === 'online') list = list.filter((d) => d.isAvailable && !d.isBlocked);
     if (activeFilter === 'offline') list = list.filter((d) => !d.isAvailable && !d.isBlocked);
     if (activeFilter === 'blocked') list = list.filter((d) => d.isBlocked);
 
@@ -245,116 +194,110 @@ const AdminDriversScreen = ({ navigation }) => {
           d.phone?.includes(q)
       );
     }
-
     return list;
   }, [all, activeFilter, search]);
 
-  // Block / unblock with confirmation
-  const handleToggleBlock = useCallback(
-    (driver) => {
-      const action = driver.isBlocked ? 'unblock' : 'block';
-      Alert.alert(
-        `${driver.isBlocked ? 'Unblock' : 'Block'} Driver`,
-        `Are you sure you want to ${action} ${driver.name}?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: driver.isBlocked ? 'Unblock' : 'Block',
-            style: driver.isBlocked ? 'default' : 'destructive',
-            onPress: () => dispatch(toggleDriverBlockStatus(driver._id)),
-          },
-        ]
-      );
-    },
-    []
-  );
+  const handleToggleBlock = useCallback((driver) => {
+    const action = driver.isBlocked ? 'unblock' : 'block';
+    Alert.alert(
+      `${driver.isBlocked ? 'Unblock' : 'Block'} Rider`,
+      `Are you sure you want to ${action} ${driver.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: driver.isBlocked ? 'Unblock' : 'Block',
+          style: driver.isBlocked ? 'default' : 'destructive',
+          onPress: () => dispatch(toggleDriverBlockStatus(driver._id)),
+        },
+      ]
+    );
+  }, []);
 
-  const renderDriver = useCallback(
-    ({ item }) => (
-      <DriverCard
-        driver={item}
-        onToggleBlock={handleToggleBlock}
-        actionLoading={actionLoading}
-      />
-    ),
-    [actionLoading, handleToggleBlock]
-  );
+  const counts = useMemo(() => ({
+    all: all.length,
+    online: all.filter((d) => d.isAvailable && !d.isBlocked).length,
+    offline: all.filter((d) => !d.isAvailable && !d.isBlocked).length,
+    blocked: all.filter((d) => d.isBlocked).length,
+  }), [all]);
 
-  const keyExtractor = useCallback((item) => item._id, []);
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color="#6C5CE7" />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
 
-      {/* ── Header ── */}
+      {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Driver Management</Text>
-          <Text style={styles.headerSub}>
-            {all.length} driver{all.length !== 1 ? 's' : ''} registered
-          </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>Riders</Text>
+          <Text style={styles.headerSub}>{all.length} registered</Text>
         </View>
         <TouchableOpacity
           style={styles.addBtn}
           onPress={() => navigation.navigate('RegisterDriver')}
           activeOpacity={0.7}
         >
-          <Text style={styles.addBtnText}>+ Add</Text>
+          <Icon name="add" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
 
-      {/* ── Summary bar ── */}
-      {!loading && <SummaryBar all={all} />}
+      {/* Summary */}
+      <View style={styles.summaryRow}>
+        {[
+          { label: 'Total', value: counts.all, color: '#6C5CE7', bg: '#EDE9FE' },
+          { label: 'Online', value: counts.online, color: '#16A34A', bg: '#DCFCE7' },
+          { label: 'Offline', value: counts.offline, color: '#94A3B8', bg: '#F1F5F9' },
+          { label: 'Blocked', value: counts.blocked, color: '#DC2626', bg: '#FEE2E2' },
+        ].map((s) => (
+          <View key={s.label} style={[styles.summaryItem, { backgroundColor: s.bg }]}>
+            <Text style={[styles.summaryValue, { color: s.color }]}>{s.value}</Text>
+            <Text style={styles.summaryLabel}>{s.label}</Text>
+          </View>
+        ))}
+      </View>
 
-      {/* ── Search ── */}
-      <View style={styles.searchContainer}>
-        <Text style={styles.searchIcon}>🔍</Text>
+      {/* Search */}
+      <View style={styles.searchWrap}>
+        <Icon name="search-outline" size={18} color="#94A3B8" />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search by name, email, vehicle no…"
-          placeholderTextColor="#94a3b8"
+          placeholder="Search riders..."
+          placeholderTextColor="#94A3B8"
           value={search}
           onChangeText={setSearch}
-          returnKeyType="search"
-          clearButtonMode="while-editing"
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => setSearch('')}>
-            <Text style={styles.searchClear}>✕</Text>
+            <Icon name="close-circle" size={18} color="#CBD5E1" />
           </TouchableOpacity>
         )}
       </View>
 
-      {/* ── Filter tabs ── */}
+      {/* Filter tabs */}
       <View style={styles.filterRow}>
         {FILTERS.map((f) => {
-          const count =
-            f.id === 'all'     ? all.length
-            : f.id === 'online'  ? all.filter((d) => d.isAvailable && !d.isBlocked).length
-            : f.id === 'offline' ? all.filter((d) => !d.isAvailable && !d.isBlocked).length
-            : all.filter((d) => d.isBlocked).length;
-
           const isActive = activeFilter === f.id;
           return (
             <TouchableOpacity
               key={f.id}
               style={[styles.filterTab, isActive && styles.filterTabActive]}
               onPress={() => setActiveFilter(f.id)}
-              activeOpacity={0.7}
             >
-              <Text style={[styles.filterTabText, isActive && styles.filterTabTextActive]}>
+              <Text style={[styles.filterText, isActive && styles.filterTextActive]}>
                 {f.label}
               </Text>
-              <View style={[styles.filterBadge, isActive && styles.filterBadgeActive]}>
-                <Text style={[styles.filterBadgeText, isActive && styles.filterBadgeTextActive]}>
-                  {count}
+              <View style={[styles.filterCount, isActive && styles.filterCountActive]}>
+                <Text style={[styles.filterCountText, isActive && { color: '#fff' }]}>
+                  {counts[f.id]}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -362,112 +305,106 @@ const AdminDriversScreen = ({ navigation }) => {
         })}
       </View>
 
-      {/* ── List ── */}
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#6366f1" />
-          <Text style={styles.loadingText}>Loading drivers…</Text>
-        </View>
-      ) : (
-        <FlatList
-          data={displayed}
-          renderItem={renderDriver}
-          keyExtractor={keyExtractor}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          ListEmptyComponent={<EmptyState filter={activeFilter} search={search} />}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor="#6366f1"
-              colors={['#6366f1']}
-            />
-          }
-          // Performance
-          removeClippedSubviews
-          maxToRenderPerBatch={10}
-          windowSize={10}
-        />
-      )}
+      {/* List */}
+      <FlatList
+        data={displayed}
+        keyExtractor={(item) => item._id}
+        renderItem={({ item }) => (
+          <DriverCard
+            driver={item}
+            onToggleBlock={handleToggleBlock}
+            actionLoading={actionLoading}
+          />
+        )}
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#6C5CE7"
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyWrap}>
+            <Icon name="bicycle-outline" size={48} color="#CBD5E1" />
+            <Text style={styles.emptyTitle}>
+              {search
+                ? 'No riders match your search'
+                : activeFilter === 'online'
+                ? 'No riders online'
+                : activeFilter === 'blocked'
+                ? 'No blocked riders'
+                : 'No riders registered'}
+            </Text>
+            <Text style={styles.emptySub}>
+              {search ? 'Try a different search' : 'Pull down to refresh'}
+            </Text>
+          </View>
+        }
+      />
     </SafeAreaView>
   );
 };
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
   // Header
   header: {
-    backgroundColor: '#1a1a2e',
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 4,
   },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: '#ffffff18',
+  headerTitle: { fontSize: 24, fontWeight: '800', color: '#0F172A' },
+  headerSub: { fontSize: 13, color: '#64748B', marginTop: 2 },
+  addBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: '#6C5CE7',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  backIcon: { color: '#fff', fontSize: 20, lineHeight: 22 },
-  headerCenter: { flex: 1 },
-  headerTitle: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.3 },
-  headerSub: { color: '#94a3b8', fontSize: 12, marginTop: 1 },
-  addBtn: {
-    backgroundColor: '#e94560',
-    borderRadius: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-  },
-  addBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
-  // Summary bar
-  summaryBar: {
+  // Summary
+  summaryRow: {
     flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     gap: 8,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
   },
   summaryItem: {
     flex: 1,
-    borderRadius: 10,
-    paddingVertical: 8,
+    borderRadius: 12,
+    paddingVertical: 10,
     alignItems: 'center',
   },
-  summaryValue: { fontSize: 20, fontWeight: '800' },
-  summaryLabel: { fontSize: 10, color: '#64748b', fontWeight: '600', marginTop: 1 },
+  summaryValue: { fontSize: 18, fontWeight: '800' },
+  summaryLabel: { fontSize: 10, color: '#475569', fontWeight: '600', marginTop: 2 },
 
   // Search
-  searchContainer: {
+  searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
-    marginHorizontal: 12,
-    marginTop: 12,
-    marginBottom: 4,
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 20,
     borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#e2e8f0',
     paddingHorizontal: 14,
-    height: 46,
+    height: 44,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  searchIcon: { fontSize: 16, marginRight: 8 },
-  searchInput: { flex: 1, fontSize: 14, color: '#1e293b' },
-  searchClear: { fontSize: 14, color: '#94a3b8', paddingLeft: 8 },
+  searchInput: { flex: 1, fontSize: 14, color: '#1E293B' },
 
-  // Filter tabs
+  // Filters
   filterRow: {
     flexDirection: 'row',
-    paddingHorizontal: 12,
+    paddingHorizontal: 20,
     paddingVertical: 10,
     gap: 8,
   },
@@ -476,135 +413,130 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 7,
     borderRadius: 20,
-    paddingVertical: 6,
-    paddingHorizontal: 6,
-    backgroundColor: '#fff',
     borderWidth: 1.5,
-    borderColor: '#e2e8f0',
+    borderColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
     gap: 4,
   },
-  filterTabActive: { backgroundColor: '#1a1a2e', borderColor: '#1a1a2e' },
-  filterTabText: { fontSize: 11, fontWeight: '700', color: '#64748b' },
-  filterTabTextActive: { color: '#fff' },
-  filterBadge: {
-    backgroundColor: '#f1f5f9',
+  filterTabActive: { backgroundColor: '#6C5CE7', borderColor: '#6C5CE7' },
+  filterText: { fontSize: 11, fontWeight: '700', color: '#64748B' },
+  filterTextActive: { color: '#FFFFFF' },
+  filterCount: {
+    backgroundColor: '#F1F5F9',
     borderRadius: 8,
     paddingHorizontal: 5,
     paddingVertical: 1,
     minWidth: 18,
     alignItems: 'center',
   },
-  filterBadgeActive: { backgroundColor: '#ffffff30' },
-  filterBadgeText: { fontSize: 10, fontWeight: '800', color: '#64748b' },
-  filterBadgeTextActive: { color: '#fff' },
+  filterCountActive: { backgroundColor: 'rgba(255,255,255,0.3)' },
+  filterCountText: { fontSize: 10, fontWeight: '800', color: '#64748B' },
 
   // List
-  listContent: { paddingHorizontal: 12, paddingTop: 4, paddingBottom: 24 },
+  list: { paddingHorizontal: 20, paddingTop: 4, paddingBottom: 24 },
 
   // Card
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  cardBlocked: {
-    borderColor: '#fecaca',
-    backgroundColor: '#fffafa',
-  },
+  cardBlocked: { borderWidth: 1, borderColor: '#FECACA' },
 
-  // Avatar
-  cardLeft: { marginRight: 12, alignItems: 'center', position: 'relative' },
+  cardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 },
   avatar: {
-    width: 46,
-    height: 46,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
+    position: 'relative',
   },
-  avatarText: { fontSize: 16, fontWeight: '800' },
-  pulseDot: {
+  avatarText: { fontSize: 15, fontWeight: '800' },
+  onlineDot: {
     position: 'absolute',
-    bottom: -2,
-    right: -2,
+    bottom: -1,
+    right: -1,
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: '#22c55e',
+    backgroundColor: '#22C55E',
     borderWidth: 2,
     borderColor: '#fff',
   },
 
-  // Card body
-  cardBody: { flex: 1 },
-  cardRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
-  driverName: { fontSize: 14, fontWeight: '800', color: '#0f172a', flex: 1, marginRight: 6 },
-  driverEmail: { fontSize: 11, color: '#64748b', marginBottom: 6 },
+  driverName: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  driverEmail: { fontSize: 11, color: '#94A3B8', marginTop: 1 },
 
   // Status pill
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 20,
+    borderRadius: 8,
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     gap: 4,
   },
-  pillOnline:  { backgroundColor: '#f0fdf4' },
-  pillOffline: { backgroundColor: '#f8fafc' },
-  pillBlocked: { backgroundColor: '#fef2f2' },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
   pillText: { fontSize: 10, fontWeight: '700' },
 
-  // Meta chips
-  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 6 },
+  // Meta
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
   metaChip: {
-    backgroundColor: '#f1f5f9',
-    borderRadius: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-  },
-  metaChipText: { fontSize: 10, color: '#475569', fontWeight: '600' },
-
-  // Stats row
-  statsRow: { flexDirection: 'row', gap: 12 },
-  statItem: { fontSize: 11, color: '#64748b' },
-  statBold: { fontWeight: '700', color: '#334155' },
-
-  // Action button
-  actionBtn: {
-    width: 54,
-    paddingVertical: 8,
-    borderRadius: 10,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 10,
-    alignSelf: 'center',
+    backgroundColor: '#F8F7FF',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    gap: 4,
   },
-  actionBtnBlock:   { backgroundColor: '#1a1a2e' },
-  actionBtnUnblock: { backgroundColor: '#22c55e' },
-  actionBtnDisabled: { opacity: 0.5 },
-  actionBtnText: { color: '#fff', fontSize: 10, fontWeight: '800', textAlign: 'center', lineHeight: 14 },
+  metaText: { fontSize: 11, color: '#475569', fontWeight: '600' },
 
-  // Loading
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
-  loadingText: { color: '#64748b', fontSize: 14 },
+  // Card bottom
+  cardBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+  },
+  statRow: { flexDirection: 'row', gap: 16 },
+  statItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  statValue: { fontSize: 13, fontWeight: '700', color: '#0F172A' },
+  statLabel: { fontSize: 11, color: '#94A3B8' },
+
+  blockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 4,
+  },
+  blockBtnDanger: { backgroundColor: '#1E293B' },
+  unblockBtn: { backgroundColor: '#22C55E' },
+  blockBtnText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
   // Empty
-  emptyState: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 32 },
-  emptyIcon: { fontSize: 48, marginBottom: 16 },
-  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#334155', textAlign: 'center', marginBottom: 6 },
-  emptySubtitle: { fontSize: 13, color: '#94a3b8', textAlign: 'center' },
+  emptyWrap: { alignItems: 'center', paddingTop: 60, gap: 8 },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#334155', textAlign: 'center' },
+  emptySub: { fontSize: 13, color: '#94A3B8' },
 });
 
 export default AdminDriversScreen;

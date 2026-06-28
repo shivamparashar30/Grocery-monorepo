@@ -51,96 +51,96 @@ const TabContainer = ({ navigation }) => {
 const AppNavigator = () => {
   return (
     <Stack.Navigator
-      initialRouteName="MainApp"
-      screenOptions={{
-        headerShown: false,
-        animation: 'slide_from_right',
-      }}
-    >
-      <Stack.Screen
-        name="MainApp"
-        component={TabContainer}
-      />
-
-      <Stack.Screen
-        name="Profile"
-        component={ProfileScreen}
-      />
-
-      <Stack.Screen
-        name="EditProfile"
-        component={EditProfileScreen}
-      />
-
-      <Stack.Screen
-        name="MyAddresses"
-        component={MyAddressesScreen}
-      />
-
-      <Stack.Screen
-        name="PaymentMethods"
-        component={PaymentMethodsScreen}
-      />
-
-      <Stack.Screen
-        name="OrderHistory"
-        component={OrderHistoryScreen}
-      />
-
-      <Stack.Screen
-        name="Settings"
-        component={SettingsScreen}
-      />
-
-      <Stack.Screen
-        name="Wishlist"
-        component={WishlistScreen}
-      />
-
-      <Stack.Screen
-        name="AddPaymentMethod"
-        component={AddPaymentMethodScreen}
-        options={{ animation: 'slide_from_bottom' }}
-      />
-
-      <Stack.Screen
-        name="CategoryProductScreen"
-        component={CategoryProductsScreen}
-        options={{ animation: 'slide_from_bottom' }}
-      />
-
-
-      <Stack.Screen
-        name="ProductDetailScreen"
-        component={ProductDetailScreen}
-        options={{ animation: 'slide_from_bottom' }}
-      />
-
-       <Stack.Screen
-        name="Cart"
-        component={CartScreen}
-        options={{ animation: 'slide_from_bottom' }}
-      />
-
-       <Stack.Screen
-        name="Checkout"
-        component={CheckoutScreen}
-        options={{ animation: 'slide_from_bottom' }}
-      />
-
-      <Stack.Screen
-        name="MapSelection"
-        component={MapSelectionScreen}
-        options={{
-          headerShown: true,
-          headerTitle: 'Select Location',
-          headerBackTitle: 'Back',
-          presentation: 'modal',
-          headerStyle: { backgroundColor: '#F5F5F5' },
-          headerTitleStyle: { fontSize: 18, fontWeight: '600' },
-          headerTintColor: '#1A1A1A',
+        initialRouteName="MainApp"
+        screenOptions={{
+          headerShown: false,
+          animation: 'slide_from_right',
         }}
-      />
+      >
+        <Stack.Screen
+          name="MainApp"
+          component={TabContainer}
+        />
+
+        <Stack.Screen
+          name="Profile"
+          component={ProfileScreen}
+        />
+
+        <Stack.Screen
+          name="EditProfile"
+          component={EditProfileScreen}
+        />
+
+        <Stack.Screen
+          name="MyAddresses"
+          component={MyAddressesScreen}
+        />
+
+        <Stack.Screen
+          name="PaymentMethods"
+          component={PaymentMethodsScreen}
+        />
+
+        <Stack.Screen
+          name="OrderHistory"
+          component={OrderHistoryScreen}
+        />
+
+        <Stack.Screen
+          name="Settings"
+          component={SettingsScreen}
+        />
+
+        <Stack.Screen
+          name="Wishlist"
+          component={WishlistScreen}
+        />
+
+        <Stack.Screen
+          name="AddPaymentMethod"
+          component={AddPaymentMethodScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+
+        <Stack.Screen
+          name="CategoryProductScreen"
+          component={CategoryProductsScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+
+
+        <Stack.Screen
+          name="ProductDetailScreen"
+          component={ProductDetailScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+
+         <Stack.Screen
+          name="Cart"
+          component={CartScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+
+         <Stack.Screen
+          name="Checkout"
+          component={CheckoutScreen}
+          options={{ animation: 'slide_from_bottom' }}
+        />
+
+        <Stack.Screen
+          name="MapSelection"
+          component={MapSelectionScreen}
+          options={{
+            headerShown: true,
+            headerTitle: 'Select Location',
+            headerBackTitle: 'Back',
+            presentation: 'modal',
+            headerStyle: { backgroundColor: '#F5F5F5' },
+            headerTitleStyle: { fontSize: 18, fontWeight: '600' },
+            headerTintColor: '#1A1A1A',
+          }}
+        />
     </Stack.Navigator>
   );
 };
@@ -150,7 +150,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  // ✅ Critical — screen must fill remaining space, not bleed under tab bar
   screenWrapper: {
     flex: 1,
     overflow: 'hidden',

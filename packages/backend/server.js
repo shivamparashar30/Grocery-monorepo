@@ -6,9 +6,7 @@ const errorHandler = require('./middleware/error');
 const auth = require('./routes/authRoutes');
 const deliveries = require('./routes/Deliveryroutes');
 const cart= require('./routes/Cartroutes');
-// const categories = require('./routes/Categoryroutes'); 
-// const products   = require('./routes/Productroutes');
-// const cart       = require('./routes/Cartroutes');
+const categories = require('./routes/Categoryroutes');
 const orders     = require('./routes/Orderroutes');
 const coupons    = require('./routes/Couponroutes');
 const addresses  = require('./routes/Addressroutes');
@@ -20,6 +18,7 @@ const stores     = require('./routes/Storeroutes');
 const inventory  = require('./routes/Inventoryroutes');
 const reviews    = require('./routes/Reviewroutes');
 const productRoutes = require('./routes/productRoutes');
+const homeSections  = require('./routes/homeSectionRoutes');
 
 // Load env vars
 dotenv.config();
@@ -46,9 +45,7 @@ app.use(
 app.use('/api/v1/auth', auth);
 app.use('/api/v1/deliveries', deliveries);
 app.use('/api/v1/cart', cart);
-// app.use('/api/v1/categories', categories);
-// app.use('/api/v1/products', products);
-// app.use('/api/v1/cart', cart);
+app.use('/api/v1/categories', categories);
 app.use('/api/v1/orders', orders);
 app.use('/api/v1/coupons', coupons);
 app.use('/api/v1/addresses', addresses);
@@ -60,6 +57,7 @@ app.use('/api/v1/stores', stores);
 app.use('/api/v1/inventory', inventory);
 app.use('/api/v1/reviews', reviews);
 app.use('/api/v1/products', productRoutes);
+app.use('/api/v1/home-sections', homeSections);
 // Root route
 app.get('/', (req, res) => {
   res.json({
