@@ -18,6 +18,7 @@ import AdminAnalyticsScreen from '../screens/admin/AdminAnalyticsScreen';
 import AdminUsersScreen from '../screens/admin/AdminUsersScreen';
 import RegisterDriverScreen from '../screens/admin/RegisterDriverScreen';
 import AdminNotificationsScreen from '../screens/admin/AdminNotificationsScreen';
+import AdminOrderDetailScreen from '../screens/admin/AdminOrderDetailScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -100,6 +101,7 @@ const AdminNavigator = () => (
       component={RegisterDriverScreen}
       options={{ animation: 'slide_from_bottom' }}
     />
+    <Stack.Screen name="AdminOrderDetail" component={AdminOrderDetailScreen} />
   </Stack.Navigator>
 );
 

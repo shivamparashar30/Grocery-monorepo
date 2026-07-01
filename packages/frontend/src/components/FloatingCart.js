@@ -11,12 +11,13 @@ import Icon from 'react-native-vector-icons/Ionicons';
 import { useCart } from '../context/CartContext';
 import { navigationRef } from '../navigation/navigationRef';
 import IMAGE_MAP from '../utils/imageMap';
+import { resolveImageUrl } from '../config/apiconfig';
 
 const CART_HEIGHT = 72;
 const BOTTOM_OFFSET = Platform.OS === 'ios' ? 96 : 76;
 const HIDDEN_Y = CART_HEIGHT + BOTTOM_OFFSET + 40;
 
-const HIDDEN_ROUTES = ['Cart', 'Checkout'];
+const HIDDEN_ROUTES = ['Cart', 'Checkout', 'MapSelection', 'ProductDetailScreen', 'MyAddresses', 'OrderDetails'];
 
 const FloatingCart = ({ currentRoute }) => {
   const { cartItems, cartCount, cartTotal } = useCart();
@@ -69,7 +70,7 @@ const FloatingCart = ({ currentRoute }) => {
     const p = item.product || {};
     const key = p.productKey;
     const localImg = key ? IMAGE_MAP[key] : null;
-    const remoteImg = p.imageUrl ? { uri: p.imageUrl } : null;
+    const remoteImg = p.imageUrl ? { uri: resolveImageUrl(p.imageUrl) } : null;
     return {
       id: p._id || item._id,
       name: p.name || '?',

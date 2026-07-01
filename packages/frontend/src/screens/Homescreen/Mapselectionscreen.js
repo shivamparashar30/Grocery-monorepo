@@ -1,401 +1,295 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  Platform,
-  PermissionsAndroid,
-  ActivityIndicator,
-  Alert,
-  Dimensions,
+  View, Text, StyleSheet, TouchableOpacity, TextInput, Platform,
+  PermissionsAndroid, ActivityIndicator, Alert, Dimensions,
+  KeyboardAvoidingView, ScrollView, Keyboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BASE_URL } from '../../config/apiconfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAddress } from '../../context/AddressContext';
 
-// Conditional imports for optional dependencies
 let MapView = null;
 let Marker = null;
 let PROVIDER_GOOGLE = null;
 let Geolocation = null;
 
 try {
-  const MapViewModule = require('react-native-maps');
-  MapView = MapViewModule.default;
-  Marker = MapViewModule.Marker;
-  PROVIDER_GOOGLE = MapViewModule.PROVIDER_GOOGLE;
+  const M = require('react-native-maps');
+  MapView = M.default;
+  Marker = M.Marker;
+  PROVIDER_GOOGLE = M.PROVIDER_GOOGLE;
 } catch (e) {
   console.warn('react-native-maps not installed');
 }
 
-// Try to import Geolocation - check which library is installed
 try {
-  // First try @react-native-community/geolocation (most common)
-  const GeoModule = require('@react-native-community/geolocation');
-  Geolocation = GeoModule.default || GeoModule;
-  console.log('Using @react-native-community/geolocation');
-} catch (e) {
+  const G = require('@react-native-community/geolocation');
+  Geolocation = G.default || G;
+} catch {
   try {
-    // Fall back to react-native-geolocation-service
-    const GeoServiceModule = require('react-native-geolocation-service');
-    Geolocation = GeoServiceModule.default || GeoServiceModule;
-    console.log('Using react-native-geolocation-service');
-  } catch (err) {
-    console.warn('No geolocation library installed');
+    const GS = require('react-native-geolocation-service');
+    Geolocation = GS.default || GS;
+  } catch {
+    console.warn('No geolocation library');
   }
 }
 
 const { height } = Dimensions.get('window');
 
+const TAGS = [
+  { key: 'home', label: 'Home', icon: 'home' },
+  { key: 'work', label: 'Office', icon: 'briefcase' },
+  { key: 'other', label: 'Other', icon: 'pricetag' },
+];
+
 const MapSelectionScreen = ({ navigation, route }) => {
+  const { fetchSavedAddresses, selectAddress, userLocation } = useAddress();
+  const insets = useSafeAreaInsets();
+  const editAddress = route?.params?.editAddress;
+  const isEdit = !!editAddress?._id;
+  const initLat = route?.params?.latitude || editAddress?.coordinates?.latitude || 26.4499;
+  const initLng = route?.params?.longitude || editAddress?.coordinates?.longitude || 74.6399;
+
   const mapRef = useRef(null);
-  const [selectedType, setSelectedType] = useState('home');
-  const [userDetails, setUserDetails] = useState({
-    fullName: '',
-    phone: '',
-  });
-  const [parsedLocation, setParsedLocation] = useState({
-    city: '',
-    state: '',
-    pincode: '',
-  });
+  const searchTimerRef = useRef(null);
+  const pendingRegionRef = useRef(null);
+  const scrollRef = useRef(null);
+
+  // Map state
   const [region, setRegion] = useState({
-    latitude: 26.4499,
-    longitude: 74.6399,
-    latitudeDelta: 0.0922,
-    longitudeDelta: 0.0421,
+    latitude: initLat, longitude: initLng, latitudeDelta: 0.005, longitudeDelta: 0.005,
   });
-  const [markerPosition, setMarkerPosition] = useState({
-    latitude: 26.4499,
-    longitude: 74.6399,
-  });
+  const [markerPos, setMarkerPos] = useState({ latitude: initLat, longitude: initLng });
   const [address, setAddress] = useState('');
-  const [addressDetails, setAddressDetails] = useState({
-    houseNumber: '',
-    floor: '',
-    landmark: '',
+  const [parsedLoc, setParsedLoc] = useState({
+    city: editAddress?.city || '', state: editAddress?.state || '', pincode: editAddress?.pincode || '',
   });
-  const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [mapReady, setMapReady] = useState(false);
-  const [hasLocationPermission, setHasLocationPermission] = useState(false);
+  const [hasPermission, setHasPermission] = useState(Platform.OS === 'ios');
+  const [loading, setLoading] = useState(false);
 
-  // Check if required dependencies are available
-  if (!MapView || !Geolocation) {
-    return (
-      <View style={styles.errorContainer}>
-        <Icon name="alert-circle" size={64} color="#FF5252" />
-        <Text style={styles.errorTitle}>Map Dependencies Missing</Text>
-        <Text style={styles.errorMessage}>
-          Please install required packages:
-          {'\n\n'}
-          npm install react-native-maps{'\n'}
-          npm install @react-native-community/geolocation
-          {'\n\n'}
-          Then follow the setup guide.
-        </Text>
-        <TouchableOpacity
-          style={styles.errorButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.errorButtonText}>Go Back</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [showResults, setShowResults] = useState(false);
 
+  // Form state
+  const [fullName, setFullName] = useState(editAddress?.fullName || '');
+  const [phone, setPhone] = useState(editAddress?.phone || '');
+  const [houseNo, setHouseNo] = useState(editAddress?.addressLine1 || '');
+  const [floor, setFloor] = useState(editAddress?.addressLine2 || '');
+  const [landmark, setLandmark] = useState(editAddress?.landmark || '');
+  const [selectedTag, setSelectedTag] = useState(editAddress?.addressType || 'home');
+  const [customTag, setCustomTag] = useState(editAddress?.customTag || '');
+
+  // ── Permission ───────────────────────────────────────────────────────────────
   useEffect(() => {
-    checkInitialPermission();
-  }, []);
-
-  useEffect(() => {
-    // Check if we should get current location after permission is granted
-    if (route?.params?.type === 'current' && hasLocationPermission) {
-      getCurrentLocation();
-    }
-  }, [hasLocationPermission]);
-
-  const checkInitialPermission = async () => {
-    try {
-      if (Platform.OS === 'android') {
-        const granted = await PermissionsAndroid.check(
+    if (Platform.OS === 'android') {
+      (async () => {
+        let granted = await PermissionsAndroid.check(
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
         );
-        setHasLocationPermission(granted);
-
-        if (!granted && route?.params?.type === 'current') {
-          // If came from "use current location", request permission
-          requestLocationPermission();
-        }
-      } else {
-        setHasLocationPermission(true);
-      }
-    } catch (error) {
-      console.error('Permission check error:', error);
-    }
-  };
-
-  const requestLocationPermission = async () => {
-    if (Platform.OS === 'android') {
-      try {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          {
-            title: 'Location Permission',
-            message: 'This app needs access to your location to show your current position on the map.',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          }
-        );
-
-        const hasPermission = granted === PermissionsAndroid.RESULTS.GRANTED;
-        setHasLocationPermission(hasPermission);
-
-        if (!hasPermission) {
-          Alert.alert(
-            'Permission Required',
-            'Location permission is required to use this feature. Please enable it in your device settings.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Open Settings',
-                onPress: () => {
-                  if (Platform.OS === 'android') {
-                    // You can use react-native-permissions or Linking to open settings
-                    Alert.alert('Info', 'Please enable location permission in Settings > Apps > Your App > Permissions');
-                  }
-                }
-              }
-            ]
-          );
-        }
-
-        return hasPermission;
-      } catch (err) {
-        console.warn('Permission error:', err);
-        Alert.alert('Error', 'Failed to request location permission');
-        return false;
-      }
-    }
-    return true;
-  };
-
-  const getCurrentLocation = async () => {
-    try {
-      console.log('Getting current location...');
-
-      // Check if Geolocation is available
-      if (!Geolocation || typeof Geolocation.getCurrentPosition !== 'function') {
-        Alert.alert(
-          'Location Service Unavailable',
-          'Geolocation library is not properly installed. Please run:\n\nnpm install @react-native-community/geolocation\n\nOr:\n\nnpm install react-native-geolocation-service',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
-        return;
-      }
-
-      // Check permission first
-      if (!hasLocationPermission) {
-        const granted = await requestLocationPermission();
         if (!granted) {
-          return;
+          const result = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+            {
+              title: 'Location Permission',
+              message: 'We need your location to detect your address.',
+              buttonPositive: 'Allow',
+            }
+          );
+          granted = result === PermissionsAndroid.RESULTS.GRANTED;
         }
-      }
-
-      setLoading(true);
-
-      // Add timeout wrapper
-      const timeoutId = setTimeout(() => {
-        setLoading(false);
-      }, 15000); // 15 second timeout
-
-      Geolocation.getCurrentPosition(
-        (position) => {
-          clearTimeout(timeoutId);
-          console.log('Location received:', position);
-
-          const { latitude, longitude } = position.coords;
-          const newRegion = {
-            latitude,
-            longitude,
-            latitudeDelta: 0.005,
-            longitudeDelta: 0.005,
-          };
-
-          setRegion(newRegion);
-          setMarkerPosition({ latitude, longitude });
-
-          // Only animate if map is ready
-          if (mapRef.current && mapReady) {
-            setTimeout(() => {
-              mapRef.current?.animateToRegion(newRegion, 1000);
-            }, 100);
-          }
-
-          reverseGeocode(latitude, longitude);
-          setLoading(false);
-        },
-        (error) => {
-          clearTimeout(timeoutId);
-          console.log('Location error:', error.code, error.message);
-          setLoading(false);
-
-          let errorMessage = 'Unable to get your current location.';
-
-          switch (error.code) {
-            case 1: // PERMISSION_DENIED
-              errorMessage = 'Location permission denied. Please enable it in settings.';
-              break;
-            case 2: // POSITION_UNAVAILABLE
-              errorMessage = 'Location unavailable. Please check if location services are enabled.';
-              break;
-            case 3: // TIMEOUT
-              errorMessage = 'Location request timed out. Please try again.';
-              break;
-            default:
-              errorMessage = 'Unable to get location. Please try again or set location manually.';
-          }
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 10000,
-          showLocationDialog: true,
-          forceRequestLocation: true,
-        }
-      );
-    } catch (error) {
-      console.error('Location error:', error);
-      setLoading(false);
-      Alert.alert('Error', 'Failed to get location. Please try again.');
+        setHasPermission(granted);
+      })();
     }
-  };
+  }, []);
 
-  const reverseGeocode = async (latitude, longitude) => {
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`,
-        {
-          headers: {
-            'Accept-Language': 'en',
-            'User-Agent': 'GroceryApp/1.0',  // Nominatim requires a User-Agent
-          },
+  // ── Auto-detect location on mount ────────────────────────────────────────────
+  useEffect(() => {
+    if (!hasPermission) return;
+    if (isEdit) {
+      reverseGeocode(initLat, initLng);
+    } else if (route?.params?.latitude) {
+      reverseGeocode(initLat, initLng);
+    } else {
+      getCurrentLocation();
+    }
+  }, [hasPermission]);
+
+  // ── Geolocation ──────────────────────────────────────────────────────────────
+  const getCurrentLocation = useCallback(() => {
+    if (!Geolocation || !hasPermission) return;
+    setLoading(true);
+    Geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        const r = { latitude, longitude, latitudeDelta: 0.005, longitudeDelta: 0.005 };
+        setRegion(r);
+        setMarkerPos({ latitude, longitude });
+        if (mapRef.current && mapReady) {
+          mapRef.current.animateToRegion(r, 1000);
+        } else {
+          pendingRegionRef.current = r;
         }
+        reverseGeocode(latitude, longitude);
+        setLoading(false);
+      },
+      (err) => {
+        setLoading(false);
+        if (err.code === 1) {
+          Alert.alert('Permission Denied', 'Enable location in your device settings.');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+    );
+  }, [hasPermission, mapReady]);
+
+  // ── Reverse geocode ──────────────────────────────────────────────────────────
+  const reverseGeocode = async (lat, lng) => {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
+        { headers: { 'Accept-Language': 'en', 'User-Agent': 'GroceryApp/1.0' } }
       );
-      const data = await response.json();
-
-      if (data && data.address) {
+      const data = await res.json();
+      if (data?.address) {
         const a = data.address;
-
-        const displayAddress = [
+        const display = [
           a.road || a.neighbourhood || a.suburb,
           a.city || a.town || a.village || a.county,
           a.state,
-        ]
-          .filter(Boolean)
-          .join(', ');
-
-        setAddress(displayAddress || data.display_name);
-
-        // Store parsed parts for payload
-        setParsedLocation({
+        ].filter(Boolean).join(', ');
+        setAddress(display || data.display_name);
+        setParsedLoc({
           city: a.city || a.town || a.village || a.county || '',
           state: a.state || '',
           pincode: a.postcode || '',
         });
       }
-    } catch (error) {
-      console.error('Reverse geocode error:', error);
-      setAddress(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+    } catch {
+      setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
     }
   };
 
-  const handleMapPress = (event) => {
-    try {
-      const { coordinate } = event.nativeEvent;
-      setMarkerPosition(coordinate);
-      reverseGeocode(coordinate.latitude, coordinate.longitude);
-    } catch (error) {
-      console.error('Map press error:', error);
+  // ── Search with location bias ─────────────────────────────────────────────────
+  const handleSearchChange = useCallback((text) => {
+    setSearchQuery(text);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (text.length < 3) {
+      setSearchResults([]);
+      setShowResults(false);
+      return;
+    }
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        // Build location-biased search URL
+        const refLat = userLocation?.latitude || markerPos.latitude;
+        const refLng = userLocation?.longitude || markerPos.longitude;
+        const delta = 0.5; // ~50km bias box
+        const viewbox = `${refLng - delta},${refLat + delta},${refLng + delta},${refLat - delta}`;
+
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text)}&countrycodes=in&limit=8&addressdetails=1&viewbox=${viewbox}&bounded=0`,
+          { headers: { 'Accept-Language': 'en', 'User-Agent': 'GroceryApp/1.0' } }
+        );
+        const results = await res.json();
+        // Sort by distance from user location (nearby first)
+        if (results?.length && refLat && refLng) {
+          results.sort((a, b) => {
+            const dA = Math.abs(parseFloat(a.lat) - refLat) + Math.abs(parseFloat(a.lon) - refLng);
+            const dB = Math.abs(parseFloat(b.lat) - refLat) + Math.abs(parseFloat(b.lon) - refLng);
+            return dA - dB;
+          });
+        }
+        setSearchResults((results || []).slice(0, 5));
+        setShowResults(results?.length > 0);
+      } catch {}
+    }, 500);
+  }, [userLocation, markerPos]);
+
+  const selectSearchResult = useCallback((result) => {
+    const lat = parseFloat(result.lat);
+    const lng = parseFloat(result.lon);
+    const r = { latitude: lat, longitude: lng, latitudeDelta: 0.005, longitudeDelta: 0.005 };
+    setRegion(r);
+    setMarkerPos({ latitude: lat, longitude: lng });
+    mapRef.current?.animateToRegion(r, 1000);
+    reverseGeocode(lat, lng);
+    setSearchQuery(
+      result.display_name?.split(',').slice(0, 2).join(',').trim() || ''
+    );
+    setShowResults(false);
+    Keyboard.dismiss();
+  }, []);
+
+  // ── Map interaction ──────────────────────────────────────────────────────────
+  const handleMapPress = (e) => {
+    const { latitude, longitude } = e.nativeEvent.coordinate;
+    setMarkerPos({ latitude, longitude });
+    reverseGeocode(latitude, longitude);
+  };
+
+  const handleMapReady = () => {
+    setMapReady(true);
+    if (pendingRegionRef.current) {
+      setTimeout(() => {
+        mapRef.current?.animateToRegion(pendingRegionRef.current, 1000);
+        pendingRegionRef.current = null;
+      }, 100);
     }
   };
 
-  const handleRegionChangeComplete = (newRegion) => {
-    setRegion(newRegion);
-  };
-
+  // ── Save ─────────────────────────────────────────────────────────────────────
   const getAuthHeaders = async () => {
-    const token = await AsyncStorage.getItem('token'); // same key you use when saving token on login
-    return {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    };
+    const token = await AsyncStorage.getItem('token');
+    return { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   };
 
-
-  const handleConfirmLocation = async () => {
-    // Validate required user-filled fields
-    if (!userDetails.fullName.trim()) {
-      Alert.alert('Required', 'Please enter your full name');
-      return;
+  const handleSave = async () => {
+    if (!fullName.trim()) return Alert.alert('Required', 'Please enter your full name');
+    if (!phone.trim() || phone.length !== 10) return Alert.alert('Required', 'Enter a valid 10-digit phone number');
+    if (!houseNo.trim()) return Alert.alert('Required', 'Please enter your house/flat number');
+    if (!address) return Alert.alert('Required', 'Select a location on the map');
+    if (!parsedLoc.city || !parsedLoc.pincode) {
+      return Alert.alert('Incomplete', 'Could not detect city/pincode. Try moving the pin.');
     }
-    if (!userDetails.phone.trim() || userDetails.phone.length !== 10) {
-      Alert.alert('Required', 'Please enter a valid 10-digit phone number');
-      return;
-    }
-
-    if (!addressDetails.houseNumber.trim()) {
-      Alert.alert('Required', 'Please enter your house/flat number');
-      return;
-    }
-    if (!address) {
-      Alert.alert('Required', 'Please select a location on the map');
-      return;
+    if (selectedTag === 'other' && !customTag.trim()) {
+      return Alert.alert('Required', 'Please name this address');
     }
 
     const payload = {
-      fullName: userDetails.fullName.trim(),
-      phone: userDetails.phone.trim(),
-      addressLine1: addressDetails.houseNumber.trim(),
-      addressLine2: addressDetails.floor.trim() || '',
-      landmark: addressDetails.landmark.trim() || '',
-      city: parsedLocation.city,
-      state: parsedLocation.state,
-      pincode: parsedLocation.pincode,
+      fullName: fullName.trim(),
+      phone: phone.trim(),
+      addressLine1: houseNo.trim(),
+      addressLine2: floor.trim(),
+      landmark: landmark.trim(),
+      city: parsedLoc.city,
+      state: parsedLoc.state,
+      pincode: parsedLoc.pincode,
       country: 'India',
-      addressType: selectedType,       // 'home' | 'work' | 'other'
-      coordinates: {
-        latitude: markerPosition.latitude,
-        longitude: markerPosition.longitude,
-      },
+      addressType: selectedTag,
+      customTag: selectedTag === 'other' ? customTag.trim() : '',
+      coordinates: { latitude: markerPos.latitude, longitude: markerPos.longitude },
     };
-
-    // Validate that reverse geocode gave us the required fields
-    if (!payload.city || !payload.state || !payload.pincode) {
-      Alert.alert(
-        'Location Incomplete',
-        'Could not detect city/pincode from map. Please try moving the pin slightly or check your internet connection.'
-      );
-      return;
-    }
 
     try {
       setLoading(true);
       const headers = await getAuthHeaders();
-      const response = await fetch(`${BASE_URL}/addresses`, {
-        method: 'POST',
+      const url = isEdit
+        ? `${BASE_URL}/addresses/${editAddress._id}`
+        : `${BASE_URL}/addresses`;
+      const res = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
         headers,
         body: JSON.stringify(payload),
       });
-  
-      const data = await response.json();
+      const data = await res.json();
       if (!data.success) throw new Error(data.message);
-
-      if (route?.params?.onLocationSelect) route.params.onLocationSelect(data.data);
+      selectAddress(data.data);
+      fetchSavedAddresses();
       navigation.goBack();
     } catch (err) {
       Alert.alert('Error', err.message || 'Failed to save address');
@@ -404,405 +298,357 @@ const MapSelectionScreen = ({ navigation, route }) => {
     }
   };
 
-  const moveToCurrentLocation = () => {
-    if (!hasLocationPermission) {
-      Alert.alert(
-        'Location Permission',
-        'Location permission is required to use this feature.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Grant Permission', onPress: () => getCurrentLocation() }
-        ]
-      );
-      return;
-    }
-
-    getCurrentLocation();
+  // Scroll to focused input
+  const handleInputFocus = (yOffset) => {
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({ y: yOffset, animated: true });
+    }, 300);
   };
 
-  return (
-    <View style={styles.container}>
-      {/* Map */}
-      <MapView
-        ref={mapRef}
-        provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-        style={styles.map}
-        initialRegion={region}
-        onRegionChangeComplete={handleRegionChangeComplete}
-        onPress={handleMapPress}
-        showsUserLocation={hasLocationPermission}
-        showsMyLocationButton={false}
-        onMapReady={() => {
-          console.log('Map is ready');
-          setMapReady(true);
-        }}
-        loadingEnabled={true}
-        loadingIndicatorColor="#E91E63"
-      >
-        <Marker
-          coordinate={markerPosition}
-          draggable
-          onDragEnd={(e) => {
-            try {
-              const { latitude, longitude } = e.nativeEvent.coordinate;
-              setMarkerPosition({ latitude, longitude });
-              reverseGeocode(latitude, longitude);
-            } catch (error) {
-              console.error('Marker drag error:', error);
-            }
-          }}
-        >
-          <View style={styles.markerContainer}>
-            <Icon name="location" size={40} color="#E91E63" />
-          </View>
-        </Marker>
-      </MapView>
-
-      {/* Top Bar */}
-      <SafeAreaView edges={['top']} style={styles.topBar}>
-        <View style={styles.topContent}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Icon name="arrow-back" size={24} color="#1A1A1A" />
-          </TouchableOpacity>
-
-          <View style={styles.searchContainer}>
-            <Icon name="search" size={20} color="#666" />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search location"
-              placeholderTextColor="#999"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-            />
-          </View>
-        </View>
-      </SafeAreaView>
-
-      {/* Current Location Button */}
-      <TouchableOpacity
-        style={styles.currentLocationButton}
-        onPress={moveToCurrentLocation}
-        activeOpacity={0.8}
-        disabled={loading}
-      >
-        {loading ? (
-          <ActivityIndicator color="#E91E63" size="small" />
-        ) : (
-          <Icon name="locate" size={24} color="#E91E63" />
-        )}
-      </TouchableOpacity>
-
-      {/* Bottom Card */}
-      <View style={styles.bottomCard}>
-        <View style={styles.dragHandle} />
-
-        <View style={styles.addressSection}>
-          <View style={styles.locationIconContainer}>
-            <Icon name="location" size={24} color="#E91E63" />
-          </View>
-          <View style={styles.addressContent}>
-            <Text style={styles.addressTitle}>
-              {address || 'Select location on map'}
-            </Text>
-            <Text style={styles.addressSubtitle}>
-              Drag the pin to adjust location
-            </Text>
-          </View>
-        </View>
-
-        {/* Address Details Form */}
-        <View style={styles.formSection}>
-          <TextInput
-            style={styles.input}
-            placeholder="Full Name"
-            placeholderTextColor="#999"
-            value={userDetails.fullName}
-            onChangeText={(text) => setUserDetails({ ...userDetails, fullName: text })}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Phone Number"
-            placeholderTextColor="#999"
-            keyboardType="phone-pad"
-            maxLength={10}
-            value={userDetails.phone}
-            onChangeText={(text) => setUserDetails({ ...userDetails, phone: text })}
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="House/Flat/Block No."
-            placeholderTextColor="#999"
-            value={addressDetails.houseNumber}
-            onChangeText={(text) =>
-              setAddressDetails({ ...addressDetails, houseNumber: text })
-            }
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Floor (Optional)"
-            placeholderTextColor="#999"
-            value={addressDetails.floor}
-            onChangeText={(text) =>
-              setAddressDetails({ ...addressDetails, floor: text })
-            }
-          />
-
-          <TextInput
-            style={styles.input}
-            placeholder="Nearby landmark (Optional)"
-            placeholderTextColor="#999"
-            value={addressDetails.landmark}
-            onChangeText={(text) =>
-              setAddressDetails({ ...addressDetails, landmark: text })
-            }
-          />
-        </View>
-
-        {/* Save Address Types */}
-        <View style={styles.addressTypes}>
-          <TouchableOpacity style={styles.addressTypeButton} onPress={() => setSelectedType('home')} >
-            <Icon name="home" size={20} color="#666" />
-            <Text style={styles.addressTypeText}>Home</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.addressTypeButton}>
-            <Icon name="briefcase" size={20} color="#666" />
-            <Text style={styles.addressTypeText}>Work</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.addressTypeButton}>
-            <Icon name="location" size={20} color="#666" />
-            <Text style={styles.addressTypeText}>Other</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Confirm Button */}
-        <TouchableOpacity
-          style={styles.confirmButton}
-          onPress={handleConfirmLocation}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.confirmButtonText}>Confirm Location</Text>
+  // ── Error state ──────────────────────────────────────────────────────────────
+  if (!MapView || !Geolocation) {
+    return (
+      <View style={styles.errorContainer}>
+        <Icon name="alert-circle" size={64} color="#FF5252" />
+        <Text style={styles.errorTitle}>Map Dependencies Missing</Text>
+        <Text style={styles.errorText}>
+          Install react-native-maps and geolocation libraries.
+        </Text>
+        <TouchableOpacity style={styles.errorBtn} onPress={() => navigation.goBack()}>
+          <Text style={styles.errorBtnText}>Go Back</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    );
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+  return (
+    <KeyboardAvoidingView
+      style={{ flex: 1, backgroundColor: '#FFF' }}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      {/* Map area */}
+      <View style={{ flex: 1, minHeight: 120 }}>
+        <MapView
+          ref={mapRef}
+          provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+          style={StyleSheet.absoluteFill}
+          initialRegion={region}
+          onRegionChangeComplete={setRegion}
+          onPress={handleMapPress}
+          showsUserLocation={hasPermission}
+          showsMyLocationButton={false}
+          onMapReady={handleMapReady}
+          loadingEnabled
+        >
+          <Marker
+            coordinate={markerPos}
+            draggable
+            onDragEnd={(e) => {
+              const { latitude, longitude } = e.nativeEvent.coordinate;
+              setMarkerPos({ latitude, longitude });
+              reverseGeocode(latitude, longitude);
+            }}
+          >
+            <View style={styles.markerWrap}>
+              <Icon name="location" size={40} color="#2BB77D" />
+            </View>
+          </Marker>
+        </MapView>
+
+        {/* Top bar overlay */}
+        <SafeAreaView edges={['top']} style={styles.topBar}>
+          <View style={styles.topContent}>
+            <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+              <Icon name="arrow-back" size={24} color="#1A1A1A" />
+            </TouchableOpacity>
+            <View style={styles.searchBox}>
+              <Icon name="search" size={18} color="#999" />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search for area, street..."
+                placeholderTextColor="#999"
+                value={searchQuery}
+                onChangeText={handleSearchChange}
+                returnKeyType="search"
+              />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => {
+                    setSearchQuery('');
+                    setSearchResults([]);
+                    setShowResults(false);
+                  }}
+                >
+                  <Icon name="close-circle" size={18} color="#CCC" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          {/* Search results dropdown */}
+          {showResults && (
+            <View style={styles.searchResults}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              >
+                {searchResults.map((item) => (
+                  <TouchableOpacity
+                    key={item.place_id}
+                    style={styles.searchItem}
+                    onPress={() => selectSearchResult(item)}
+                  >
+                    <Icon name="location-outline" size={20} color="#2BB77D" style={{ marginTop: 2 }} />
+                    <Text style={styles.searchItemText} numberOfLines={2}>
+                      {item.display_name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+        </SafeAreaView>
+
+        {/* GPS locate button */}
+        <TouchableOpacity
+          style={styles.gpsFab}
+          onPress={getCurrentLocation}
+          activeOpacity={0.8}
+          disabled={loading}
+        >
+          {loading ? (
+            <ActivityIndicator color="#2BB77D" size="small" />
+          ) : (
+            <Icon name="locate" size={24} color="#2BB77D" />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Bottom card */}
+      <View style={styles.bottomCard}>
+          <View style={styles.dragHandle} />
+
+          {/* Scrollable form */}
+          <ScrollView
+            ref={scrollRef}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            bounces={false}
+            contentContainerStyle={{ paddingBottom: 8 }}
+          >
+            {/* Detected address */}
+            <View style={styles.addrRow}>
+              <View style={styles.addrIconWrap}>
+                <Icon name="location" size={22} color="#2BB77D" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.addrTitle} numberOfLines={2}>
+                  {address || 'Select location on map'}
+                </Text>
+                <Text style={styles.addrSub}>Drag the pin to adjust location</Text>
+              </View>
+            </View>
+
+            <View style={styles.divider} />
+
+            {/* Form fields */}
+            <TextInput
+              style={styles.input}
+              placeholder="Full Name *"
+              placeholderTextColor="#999"
+              value={fullName}
+              onChangeText={setFullName}
+              onFocus={() => handleInputFocus(0)}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Phone Number *"
+              placeholderTextColor="#999"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+              maxLength={10}
+              onFocus={() => handleInputFocus(50)}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="House / Flat / Block No. *"
+              placeholderTextColor="#999"
+              value={houseNo}
+              onChangeText={setHouseNo}
+              onFocus={() => handleInputFocus(100)}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Floor (Optional)"
+              placeholderTextColor="#999"
+              value={floor}
+              onChangeText={setFloor}
+              onFocus={() => handleInputFocus(150)}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Nearby Landmark (Optional)"
+              placeholderTextColor="#999"
+              value={landmark}
+              onChangeText={setLandmark}
+              onFocus={() => handleInputFocus(200)}
+            />
+
+            {/* Address tag selection */}
+            <Text style={styles.tagLabel}>Save as</Text>
+            <View style={styles.tagRow}>
+              {TAGS.map((t) => (
+                <TouchableOpacity
+                  key={t.key}
+                  style={[styles.tagBtn, selectedTag === t.key && styles.tagBtnActive]}
+                  onPress={() => setSelectedTag(t.key)}
+                  activeOpacity={0.8}
+                >
+                  <Icon
+                    name={t.icon}
+                    size={16}
+                    color={selectedTag === t.key ? '#FFF' : '#666'}
+                  />
+                  <Text
+                    style={[styles.tagBtnText, selectedTag === t.key && styles.tagBtnTextActive]}
+                  >
+                    {t.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Custom tag input (when Other is selected) */}
+            {selectedTag === 'other' && (
+              <TextInput
+                style={styles.input}
+                placeholder="Name this address (e.g., Gym, Mom's House)"
+                placeholderTextColor="#999"
+                value={customTag}
+                onChangeText={setCustomTag}
+                maxLength={30}
+                onFocus={() => handleInputFocus(300)}
+              />
+            )}
+          </ScrollView>
+
+          {/* Sticky Save button - always visible above keyboard */}
+          <View style={[styles.saveBtnContainer, { paddingBottom: Platform.OS === 'ios' ? Math.max(insets.bottom, 12) : 12 }]}>
+            <TouchableOpacity
+              style={styles.saveBtn}
+              onPress={handleSave}
+              activeOpacity={0.8}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <Text style={styles.saveBtnText}>
+                  {isEdit ? 'Update Address' : 'Save Address'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  map: {
-    flex: 1,
-  },
-  markerContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
-    backgroundColor: '#FFF',
+    flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#FFF',
   },
-  errorTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    marginTop: 16,
-    marginBottom: 8,
+  errorTitle: { fontSize: 20, fontWeight: '700', color: '#1A1A1A', marginTop: 16 },
+  errorText: { fontSize: 14, color: '#666', textAlign: 'center', marginTop: 8 },
+  errorBtn: {
+    marginTop: 24, backgroundColor: '#2BB77D', paddingHorizontal: 32,
+    paddingVertical: 12, borderRadius: 12,
   },
-  errorMessage: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  errorButton: {
-    marginTop: 24,
-    backgroundColor: '#E91E63',
-    paddingHorizontal: 32,
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  errorButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  topBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'transparent',
-  },
+  errorBtnText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
+  markerWrap: { alignItems: 'center', justifyContent: 'center' },
+  topBar: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
   topContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    gap: 12,
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16,
+    paddingTop: 12, gap: 12,
   },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+  backBtn: {
+    width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1, shadowRadius: 4, elevation: 3,
   },
-  searchContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+  searchBox: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, gap: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1, shadowRadius: 4, elevation: 3,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1A1A1A',
-    marginLeft: 12,
-    fontWeight: '500',
+  searchInput: { flex: 1, fontSize: 15, color: '#1A1A1A', fontWeight: '500', padding: 0 },
+  searchResults: {
+    marginHorizontal: 16, marginTop: 8, backgroundColor: '#FFF', borderRadius: 12,
+    maxHeight: 220, overflow: 'hidden',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15, shadowRadius: 8, elevation: 5,
   },
-  currentLocationButton: {
-    position: 'absolute',
-    right: 16,
-    bottom: height * 0.5,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 6,
+  searchItem: {
+    flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 16,
+    paddingVertical: 14, borderBottomWidth: 0.5, borderBottomColor: '#F0F0F0', gap: 12,
+  },
+  searchItemText: { flex: 1, fontSize: 14, color: '#333', lineHeight: 20 },
+  gpsFab: {
+    position: 'absolute', right: 16, bottom: 16, width: 48, height: 48,
+    borderRadius: 24, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15, shadowRadius: 6, elevation: 5,
   },
   bottomCard: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 10,
-    maxHeight: height * 0.75,
+    maxHeight: height * 0.55, backgroundColor: '#FFF', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    paddingHorizontal: 20, paddingTop: 12,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1, shadowRadius: 8, elevation: 10,
   },
   dragHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 20,
+    width: 40, height: 4, backgroundColor: '#E0E0E0', borderRadius: 2,
+    alignSelf: 'center', marginBottom: 16,
   },
-  addressSection: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 16,
+  addrRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 16, gap: 12 },
+  addrIconWrap: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: '#E8F5E9',
+    justifyContent: 'center', alignItems: 'center',
   },
-  locationIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FCE4EC',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  addressContent: {
-    flex: 1,
-  },
-  addressTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    marginBottom: 4,
-  },
-  addressSubtitle: {
-    fontSize: 14,
-    color: '#666',
-  },
-  formSection: {
-    marginBottom: 16,
-  },
+  addrTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', marginBottom: 2 },
+  addrSub: { fontSize: 13, color: '#999' },
+  divider: { height: 1, backgroundColor: '#F0F0F0', marginBottom: 16 },
   input: {
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#1A1A1A',
-    marginBottom: 12,
+    backgroundColor: '#F5F5F5', borderRadius: 12, paddingHorizontal: 16,
+    paddingVertical: 12, fontSize: 15, color: '#1A1A1A', marginBottom: 12,
   },
-  addressTypes: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
+  tagLabel: { fontSize: 13, fontWeight: '700', color: '#999', marginBottom: 10, marginTop: 4 },
+  tagRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+  tagBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#F5F5F5', borderRadius: 12, paddingVertical: 10, gap: 6,
+    borderWidth: 1.5, borderColor: 'transparent',
   },
-  addressTypeButton: {
-    flex: 1,
-    flexDirection: 'row',
+  tagBtnActive: { backgroundColor: '#2BB77D', borderColor: '#2BB77D' },
+  tagBtnText: { fontSize: 13, fontWeight: '600', color: '#666' },
+  tagBtnTextActive: { color: '#FFF' },
+  saveBtnContainer: {
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+    backgroundColor: '#FFF',
+  },
+  saveBtn: {
+    backgroundColor: '#2BB77D', borderRadius: 12, paddingVertical: 15,
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F5F5F5',
-    borderRadius: 12,
-    paddingVertical: 10,
-    gap: 8,
+    shadowColor: '#2BB77D', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 6,
   },
-  addressTypeText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-  },
-  confirmButton: {
-    backgroundColor: '#E91E63',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    shadowColor: '#E91E63',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 6,
-  },
-  confirmButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#FFF',
-  },
+  saveBtnText: { fontSize: 16, fontWeight: '700', color: '#FFF' },
 });
 
 export default MapSelectionScreen;

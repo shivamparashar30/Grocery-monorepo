@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useCart } from '../context/CartContext';
+import { resolveImageUrl } from '../config/apiconfig';
 
   const IMAGE_MAP = {
     v1: require('../assets/categories/vegetablefruits/tomato.jpg'),
@@ -147,14 +148,15 @@ const CartScreen = ({ navigation }) => {
     console.log('CART ITEM:', JSON.stringify(item, null, 2));
     const productId = product?._id;
 
-    // Use local image from map, fallback to uri if somehow available
     const localImage = IMAGE_MAP[product?.productKey];
+    const remoteImage = product?.imageUrl ? { uri: resolveImageUrl(product.imageUrl) } : null;
+    const imageSource = localImage || remoteImage;
 
     return (
       <View style={styles.cartItem}>
         <View style={styles.itemImageWrap}>
-          {localImage ? (
-            <Image source={localImage} style={styles.itemImage} resizeMode="contain" />
+          {imageSource ? (
+            <Image source={imageSource} style={styles.itemImage} resizeMode="contain" />
           ) : (
             <View style={styles.itemImagePlaceholder} />
           )}

@@ -91,7 +91,7 @@ exports.broadcastNotification = asyncHandler(async (req, res, next) => {
 
   // Get all users with their FCM tokens
   const User = require('../models/user');
-  const users = await User.find({ isActive: true }).select('_id fcmTokens');
+  const users = await User.find({ isBlocked: { $ne: true } }).select('_id fcmTokens');
 
   // Create in-app notification for each user
   const notifications = users.map((user) => ({
@@ -205,6 +205,30 @@ exports.deleteAllNotifications = asyncHandler(async (req, res, next) => {
   res.status(200).json({
     success: true,
     message: 'All notifications deleted successfully',
+  });
+});
+
+// @desc    Get all notifications (Admin)
+// @route   GET /api/v1/notifications/admin/all
+// @access  Private/Admin
+exports.getAllNotifications = asyncHandler(async (req, res, next) => {
+  const { type, page = 1, limit = 50 } = req.query;
+  const query = {};
+  if (type) query.type = type;
+
+  const total = await Notification.countDocuments(query);
+  const notifications = await Notification.find(query)
+    .populate('user', 'name email')
+    .sort('-createdAt')
+    .skip((page - 1) * limit)
+    .limit(parseInt(limit));
+
+  res.status(200).json({
+    success: true,
+    count: notifications.length,
+    total,
+    pages: Math.ceil(total / limit),
+    data: notifications,
   });
 });
 

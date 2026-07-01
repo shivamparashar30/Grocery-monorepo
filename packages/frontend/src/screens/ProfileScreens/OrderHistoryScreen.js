@@ -6,14 +6,15 @@ import {
   TouchableOpacity,
   Image,
   StatusBar,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
 import tw from '../../utils/tailwind';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BASE_URL } from '../../config/apiconfig';
+import { BASE_URL, resolveImageUrl } from '../../config/apiconfig';
 
 const IMAGE_MAP = {
   v1: require('../../assets/categories/vegetablefruits/tomato.jpg'),
@@ -249,6 +250,12 @@ const OrderHistoryScreen = ({ navigation }) => {
                   style={tw`w-full h-full rounded-lg`}
                   resizeMode="contain"
                 />
+              ) : product.imageUrl ? (
+                <Image
+                  source={{ uri: resolveImageUrl(product.imageUrl) }}
+                  style={tw`w-full h-full rounded-lg`}
+                  resizeMode="contain"
+                />
               ) : (
                 <View style={tw`w-full h-full rounded-lg bg-gray-200 items-center justify-center`}>
                   <Text style={tw`text-xs font-bold text-gray-500`}>
@@ -331,13 +338,34 @@ const OrderHistoryScreen = ({ navigation }) => {
             <>
               <TouchableOpacity
                 style={tw`flex-1 bg-blue-50 rounded-lg py-2.5 items-center border border-blue-500`}
-                onPress={() => console.log('Track')}
+                onPress={() => navigation.navigate('OrderDetails', { order })}
               >
                 <Text style={tw`text-sm font-bold text-blue-600`}>Track Order</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={tw`flex-1 bg-red-50 rounded-lg py-2.5 items-center border border-red-500`}
-                onPress={() => console.log('Cancel')}
+                onPress={() => {
+                  Alert.alert('Cancel Order', 'Are you sure?', [
+                    { text: 'No', style: 'cancel' },
+                    {
+                      text: 'Yes',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          const token = await AsyncStorage.getItem('token');
+                          const res = await fetch(`${BASE_URL}/orders/${order.id}/cancel`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            setOrders(prev => prev.map(o => o.id === order.id ? { ...o, status: 'Cancelled' } : o));
+                          }
+                        } catch {}
+                      },
+                    },
+                  ]);
+                }}
               >
                 <Text style={tw`text-sm font-bold text-red-600`}>Cancel</Text>
               </TouchableOpacity>

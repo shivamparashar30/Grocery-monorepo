@@ -138,6 +138,7 @@ const AdminHomescreen = ({ navigation }) => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -155,14 +156,30 @@ const AdminHomescreen = ({ navigation }) => {
     }
   }, []);
 
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const token = await AsyncStorage.getItem('token');
+      const res = await fetch(`${BASE_URL}/notifications/unread/count`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.success) setUnreadCount(data.count || 0);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     fetchStats();
+    fetchUnreadCount();
     dispatch(fetchAllDrivers());
+    // Poll unread count every 30s
+    const interval = setInterval(fetchUnreadCount, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchStats();
+    fetchUnreadCount();
     dispatch(fetchAllDrivers({ refresh: true }));
   }, []);
 
@@ -211,7 +228,11 @@ const AdminHomescreen = ({ navigation }) => {
               activeOpacity={0.7}
             >
               <Icon name="notifications-outline" size={22} color="#fff" />
-              <View style={styles.notifDot} />
+              {unreadCount > 0 && (
+                <View style={styles.notifBadge}>
+                  <Text style={styles.notifBadgeText}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           </View>
 
@@ -389,16 +410,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  notifDot: {
+  notifBadge: {
     position: 'absolute',
-    top: 10,
-    right: 11,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    top: 6,
+    right: 6,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
     backgroundColor: '#EF4444',
     borderWidth: 1.5,
     borderColor: '#312E81',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  notifBadgeText: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '800',
   },
 
   // Driver strip

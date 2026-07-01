@@ -10,7 +10,8 @@ exports.getActiveSections = asyncHandler(async (req, res) => {
     .sort({ sortOrder: 1 })
     .populate({
       path: 'products',
-      select: 'name price unit badge productKey imageUrl stock',
+      select: 'name price discountPrice discountPercentage unit badge productKey imageUrl images stock isOutOfStock description brand weight',
+      populate: { path: 'category', select: 'name' },
     });
 
   res.status(200).json({ success: true, count: sections.length, data: sections });

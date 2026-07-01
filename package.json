@@ -12,6 +12,8 @@
     "frontend:android": "npm run android -w packages/frontend",
     "frontend:ios": "npm run ios -w packages/frontend",
     "frontend:start": "npm run start -w packages/frontend",
+    "admin:dev": "npm run dev -w packages/admin",
+    "admin:build": "npm run build -w packages/admin",
     "install:all": "npm install"
   },
   "engines": {

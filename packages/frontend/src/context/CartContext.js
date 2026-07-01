@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = '@grocery_cart';
@@ -8,14 +8,17 @@ export const CartProvider = ({ children }) => {
   const [cartItems, setCartItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // ── Persist helpers ──────────────────────────────────────────────────────
-  const persist = async (items) => {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch (e) {
-      console.error('Cart persist error:', e);
-    }
-  };
+  // ── Debounced persistence ────────────────────────────────────────────────
+  const persistTimer = useRef(null);
+  const latestItems = useRef(cartItems);
+  latestItems.current = cartItems;
+
+  const schedulePersist = useCallback(() => {
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(() => {
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(latestItems.current)).catch(() => {});
+    }, 400);
+  }, []);
 
   // ── Load on mount ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -29,17 +32,21 @@ export const CartProvider = ({ children }) => {
         setLoading(false);
       }
     })();
+    return () => { if (persistTimer.current) clearTimeout(persistTimer.current); };
   }, []);
 
-  // ── Derived ──────────────────────────────────────────────────────────────
-  const cart = {};
-  cartItems.forEach((item) => {
-    const pid = item.product?._id ?? item.product;
-    cart[pid] = item.quantity;
-  });
+  // ── Derived (memoized) ──────────────────────────────────────────────────
+  const cart = useMemo(() => {
+    const map = {};
+    cartItems.forEach((item) => {
+      const pid = item.product?._id ?? item.product;
+      map[pid] = item.quantity;
+    });
+    return map;
+  }, [cartItems]);
 
-  const cartCount = cartItems.reduce((sum, i) => sum + i.quantity, 0);
-  const cartTotal = cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  const cartCount = useMemo(() => cartItems.reduce((sum, i) => sum + i.quantity, 0), [cartItems]);
+  const cartTotal = useMemo(() => cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0), [cartItems]);
 
   // ── Add item ─────────────────────────────────────────────────────────────
   const addItem = useCallback((product) => {
@@ -47,36 +54,33 @@ export const CartProvider = ({ children }) => {
 
     setCartItems((prev) => {
       const existing = prev.find((i) => (i.product?._id ?? i.product) === productId);
-      let next;
       if (existing) {
-        next = prev.map((i) =>
+        return prev.map((i) =>
           (i.product?._id ?? i.product) === productId
             ? { ...i, quantity: i.quantity + 1 }
             : i
         );
-      } else {
-        next = [
-          ...prev,
-          {
-            _id: `local_${productId}_${Date.now()}`,
-            product: {
-              _id: productId,
-              name: product.name,
-              productKey: product.productKey,
-              unit: product.unit,
-              category: product.category,
-              price: product.price,
-              imageUrl: product.imageUrl,
-            },
-            quantity: 1,
-            price: product.price,
-          },
-        ];
       }
-      persist(next);
-      return next;
+      return [
+        ...prev,
+        {
+          _id: `local_${productId}_${Date.now()}`,
+          product: {
+            _id: productId,
+            name: product.name,
+            productKey: product.productKey,
+            unit: product.unit,
+            category: product.category,
+            price: product.price,
+            imageUrl: product.imageUrl,
+          },
+          quantity: 1,
+          price: product.price,
+        },
+      ];
     });
-  }, []);
+    schedulePersist();
+  }, [schedulePersist]);
 
   // ── Remove item (decrement or delete) ────────────────────────────────────
   const removeItem = useCallback((productId) => {
@@ -84,44 +88,42 @@ export const CartProvider = ({ children }) => {
       const existing = prev.find((i) => (i.product?._id ?? i.product) === productId);
       if (!existing) return prev;
 
-      let next;
       if (existing.quantity <= 1) {
-        next = prev.filter((i) => (i.product?._id ?? i.product) !== productId);
-      } else {
-        next = prev.map((i) =>
-          (i.product?._id ?? i.product) === productId
-            ? { ...i, quantity: i.quantity - 1 }
-            : i
-        );
+        return prev.filter((i) => (i.product?._id ?? i.product) !== productId);
       }
-      persist(next);
-      return next;
+      return prev.map((i) =>
+        (i.product?._id ?? i.product) === productId
+          ? { ...i, quantity: i.quantity - 1 }
+          : i
+      );
     });
-  }, []);
+    schedulePersist();
+  }, [schedulePersist]);
 
   // ── Clear cart ───────────────────────────────────────────────────────────
   const clearCart = useCallback(() => {
     setCartItems([]);
-    persist([]);
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([])).catch(() => {});
   }, []);
 
   // ── Fetch cart (no-op, kept for API compatibility) ───────────────────────
   const fetchCart = useCallback(() => {}, []);
 
+  const value = useMemo(() => ({
+    cart,
+    cartItems,
+    loading,
+    addItem,
+    removeItem,
+    clearCart,
+    fetchCart,
+    cartCount,
+    cartTotal,
+  }), [cart, cartItems, loading, addItem, removeItem, clearCart, fetchCart, cartCount, cartTotal]);
+
   return (
-    <CartContext.Provider
-      value={{
-        cart,
-        cartItems,
-        loading,
-        addItem,
-        removeItem,
-        clearCart,
-        fetchCart,
-        cartCount,
-        cartTotal,
-      }}
-    >
+    <CartContext.Provider value={value}>
       {children}
     </CartContext.Provider>
   );

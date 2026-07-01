@@ -1,8 +1,10 @@
 const express = require('express');
+const http = require('http');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const connectDB = require('./config/db');
 const errorHandler = require('./middleware/error');
+const { initializeSocket } = require('./services/socketService');
 const auth = require('./routes/authRoutes');
 const deliveries = require('./routes/Deliveryroutes');
 const cart= require('./routes/Cartroutes');
@@ -19,6 +21,7 @@ const inventory  = require('./routes/Inventoryroutes');
 const reviews    = require('./routes/Reviewroutes');
 const productRoutes = require('./routes/productRoutes');
 const homeSections  = require('./routes/homeSectionRoutes');
+const earnings      = require('./routes/earningsRoutes');
 
 // Load env vars
 dotenv.config();
@@ -29,6 +32,12 @@ connectDB();
 // Initialize express app
 const app = express();
 
+// Create HTTP server for Socket.IO
+const server = http.createServer(app);
+
+// Initialize Socket.IO
+initializeSocket(server);
+
 // Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -36,10 +45,22 @@ app.use(express.urlencoded({ extended: true }));
 // CORS middleware
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:8080',
+    origin: function (origin, callback) {
+      // Allow requests with no origin (mobile apps, curl, etc)
+      if (!origin) return callback(null, true);
+      // Allow all localhost origins
+      if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+        return callback(null, true);
+      }
+      callback(null, true);
+    },
     credentials: true,
   })
 );
+
+// Serve uploaded files
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Mount routers
 app.use('/api/v1/auth', auth);
@@ -58,6 +79,7 @@ app.use('/api/v1/inventory', inventory);
 app.use('/api/v1/reviews', reviews);
 app.use('/api/v1/products', productRoutes);
 app.use('/api/v1/home-sections', homeSections);
+app.use('/api/v1/earnings', earnings);
 // Root route
 app.get('/', (req, res) => {
   res.json({
@@ -89,6 +111,6 @@ app.use(errorHandler);
 // Start server
 const PORT = process.env.PORT || 8080;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });

@@ -5,14 +5,28 @@ import store from './src/store/store';
 import { loadStoredAuth } from './src/store/slices/authSlice';
 import { loadStoredUser } from './src/store/slices/userSlice';
 import RootNavigator from './src/navigation/RootNavigator';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import notificationService from './src/services/notificationService';
+import { authService } from './src/services/authService';
+import { useSocket } from './src/context/SocketContext';
 import { CartProvider } from './src/context/CartContext';
 import { WishlistProvider } from './src/context/WishlistContext';
+import { SocketProvider } from './src/context/SocketContext';
 
 // App Content with Redux hooks
 const AppContent = () => {
   const dispatch = useDispatch();
   const { isAuthenticated, isInitialized } = useSelector((state) => state.auth);
+  const socket = useSocket();
+
+  // Connect/disconnect socket based on auth state
+  useEffect(() => {
+    if (isAuthenticated && isInitialized) {
+      socket?.connect();
+    } else if (!isAuthenticated && isInitialized) {
+      socket?.disconnect();
+    }
+  }, [isAuthenticated, isInitialized]);
 
   useEffect(() => {
     // Initialize app - load stored auth data and setup notifications
@@ -26,16 +40,25 @@ const AppContent = () => {
 
         console.log('Auth data loaded from storage');
 
-        // Initialize notifications
+        // Initialize notifications and sync FCM token to backend
         const hasPermission = await notificationService.requestPermission();
-        
+
         if (hasPermission) {
           console.log('Notification permission granted');
-          const token = await notificationService.getToken();
-          
-          if (token) {
-            console.log('FCM Token obtained:', token);
-            // Token is available for backend sync if needed
+          const fcmToken = await notificationService.getToken();
+
+          if (fcmToken) {
+            console.log('FCM Token obtained');
+            // Sync FCM token to backend if user is logged in
+            try {
+              const authToken = await AsyncStorage.getItem('token');
+              if (authToken) {
+                await authService.updateFCMToken(authToken, fcmToken);
+                console.log('FCM token synced to backend');
+              }
+            } catch (syncErr) {
+              console.warn('FCM token sync failed (will retry on next launch):', syncErr.message);
+            }
           }
         } else {
           console.log('Notification permission denied');
@@ -96,7 +119,9 @@ const App = () => {
     <WishlistProvider>
     <CartProvider>
     <Provider store={store}>
-      <AppContent />
+      <SocketProvider>
+        <AppContent />
+      </SocketProvider>
     </Provider>
     </CartProvider>
     </WishlistProvider>

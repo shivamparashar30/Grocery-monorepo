@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
   Image,
   Keyboard,
   StyleSheet,
+  Platform,
+  PanResponder,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
@@ -21,13 +23,14 @@ import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityI
 import FontAwesome5 from 'react-native-vector-icons/FontAwesome5';
 import LinearGradient from 'react-native-linear-gradient';
 import LottieView from 'lottie-react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import AddressSelectionModal from './Homescreen/AddressSelectionModal';
 import { useNavigation } from '@react-navigation/native';
 import { useCart } from '../context/CartContext';
+import { useAddress } from '../context/AddressContext';
 import { useWishlist } from '../context/WishlistContext';
-import { BASE_URL } from '../config/apiconfig';
+import { BASE_URL, resolveImageUrl } from '../config/apiconfig';
 import IMAGE_MAP from '../utils/imageMap';
+import { hapticAddToCart, hapticIncrement, hapticDecrement, hapticRemoved, hapticTick } from '../utils/haptics';
 
 const SNOW_ANIMS_COUNT = 6;
 
@@ -117,26 +120,157 @@ const BannerCard = ({ item, width, onPress }) => (
   </TouchableOpacity>
 );
 
-const ProductCard = ({ item, cardWidth }) => {
+// ── Mini-carousel for product cards (PanResponder-driven) ────────────────────
+const CardCarousel = React.memo(({ images, width, height }) => {
+  const count = images.length;
+  const idxRef = useRef(0);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      // Capture horizontal gestures before the parent FlatList can
+      onMoveShouldSetPanResponder: (_, g) =>
+        count > 1 && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      onMoveShouldSetPanResponderCapture: (_, g) =>
+        count > 1 && Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      onPanResponderTerminationRequest: () => false, // don't let parent steal
+      onPanResponderGrant: () => {
+        translateX.stopAnimation();
+        translateX.setOffset(-idxRef.current * width);
+        translateX.setValue(0);
+      },
+      onPanResponderMove: (_, g) => {
+        // Clamp so it can't scroll beyond first/last
+        const raw = g.dx;
+        const curOffset = -idxRef.current * width;
+        const combined = curOffset + raw;
+        const clamped = Math.max(-(count - 1) * width, Math.min(0, combined));
+        translateX.setOffset(0);
+        translateX.setValue(clamped);
+      },
+      onPanResponderRelease: (_, g) => {
+        translateX.flattenOffset();
+        let newIdx = idxRef.current;
+        if (g.dx < -width * 0.2 || g.vx < -0.4) newIdx = Math.min(idxRef.current + 1, count - 1);
+        else if (g.dx > width * 0.2 || g.vx > 0.4) newIdx = Math.max(idxRef.current - 1, 0);
+
+        if (newIdx !== idxRef.current) hapticTick();
+        idxRef.current = newIdx;
+        setActiveIdx(newIdx);
+        Animated.spring(translateX, {
+          toValue: -newIdx * width,
+          friction: 9,
+          tension: 50,
+          useNativeDriver: true,
+        }).start();
+      },
+    })
+  ).current;
+
+  return (
+    <View style={{ width, height, overflow: 'hidden' }} {...panResponder.panHandlers}>
+      <Animated.View
+        style={{
+          flexDirection: 'row',
+          width: width * count,
+          height,
+          transform: [{ translateX }],
+        }}
+      >
+        {images.map((src, i) => (
+          <View key={i} style={{ width, height, justifyContent: 'center', alignItems: 'center' }}>
+            <Image source={src} style={s.productImg} resizeMode="contain" />
+          </View>
+        ))}
+      </Animated.View>
+      {count > 1 && (
+        <View style={s.carouselDots}>
+          {images.map((_, i) => (
+            <View key={i} style={[s.carouselDot, activeIdx === i && s.carouselDotActive]} />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+});
+
+const ProductCard = ({ item, cardWidth, onPress }) => {
   const { cart, addItem, removeItem } = useCart();
   const { isInWishlist, toggleWishlist } = useWishlist();
   const [imgError, setImgError] = useState(false);
-  const localImg = IMAGE_MAP[item.productKey];
-  const hasUrl = !imgError && item.imageUrl;
-  const imageSource = localImg || (hasUrl ? { uri: item.imageUrl } : null);
   const wishlisted = isInWishlist(item.productKey || item._id);
   const placeholderBg = getPlaceholderColor(item.name);
   const qty = cart[item._id] || 0;
+
+  // Bounce animation on qty text when value changes
+  const qtyBounce = useRef(new Animated.Value(1)).current;
+  const prevQtyRef = useRef(qty);
+  useEffect(() => {
+    if (qty > 0 && qty !== prevQtyRef.current) {
+      qtyBounce.setValue(0.75);
+      Animated.spring(qtyBounce, { toValue: 1, friction: 5, tension: 200, useNativeDriver: true }).start();
+    }
+    prevQtyRef.current = qty;
+  }, [qty]);
+
+  // Build all image sources (server images → local fallback → imageUrl fallback)
+  const imageSources = useMemo(() => {
+    const sources = [];
+    if (item.images?.length > 0) {
+      item.images.forEach(img => {
+        const url = resolveImageUrl(img.url);
+        if (url) sources.push({ uri: url });
+      });
+    }
+    if (sources.length === 0) {
+      const local = IMAGE_MAP[item.productKey];
+      if (local) sources.push(local);
+    }
+    if (sources.length === 0 && item.imageUrl) {
+      const resolved = resolveImageUrl(item.imageUrl);
+      if (resolved) sources.push({ uri: resolved });
+    }
+    return sources;
+  }, [item.images, item.productKey, item.imageUrl]);
+
+  const handleAddToCart = useCallback(() => {
+    hapticAddToCart();
+    addItem(item);
+  }, [item, addItem]);
+
+  const handleIncrement = useCallback(() => {
+    hapticIncrement();
+    addItem(item);
+  }, [item, addItem]);
+
+  const handleRemoveFromCart = useCallback(() => {
+    if (qty === 1) {
+      hapticRemoved();
+    } else {
+      hapticDecrement();
+    }
+    removeItem(item._id);
+  }, [qty, item._id, removeItem]);
+
   return (
-    <View style={[s.productCard, { width: cardWidth }]}>
-      <View style={[s.productImgWrap, { backgroundColor: imageSource ? '#F7F6F2' : placeholderBg + '20' }]}>
+    <TouchableOpacity
+      style={[s.productCard, { width: cardWidth }]}
+      activeOpacity={0.85}
+      onPress={() => onPress?.(item)}
+    >
+      <View style={[s.productImgWrap, { backgroundColor: imageSources.length ? '#F7F6F2' : placeholderBg + '20' }]}>
         {item.badge && (
           <View style={s.productTag}>
             <Text style={s.productTagText}>{item.badge}</Text>
           </View>
         )}
-        {imageSource ? (
-          <Image source={imageSource} style={s.productImg} resizeMode="contain" onError={() => setImgError(true)} />
+        {imageSources.length > 0 ? (
+          imageSources.length > 1 ? (
+            <CardCarousel images={imageSources} width={cardWidth} height={115} />
+          ) : (
+            <Image source={imageSources[0]} style={s.productImg} resizeMode="contain" onError={() => setImgError(true)} />
+          )
         ) : (
           <View style={[s.productPlaceholder, { backgroundColor: placeholderBg + '30' }]}>
             {item.icon ? (
@@ -155,30 +289,29 @@ const ProductCard = ({ item, cardWidth }) => {
       <View style={s.productInfo}>
         <Text style={s.productName} numberOfLines={2}>{item.name}</Text>
         <View style={s.productPriceRow}>
-          <Text style={s.productPrice}>Rs.{item.price}</Text>
+          <Text style={s.productPrice}>Rs.{item.discountPrice || item.price}</Text>
+          {item.discountPrice && item.discountPrice < item.price && (
+            <Text style={s.productOrigPrice}>Rs.{item.price}</Text>
+          )}
           <Text style={s.productUnit}>{item.unit}</Text>
         </View>
         {qty > 0 ? (
           <View style={s.qtyRow}>
-            <TouchableOpacity style={s.qtyBtn} onPress={() => removeItem(item._id)} activeOpacity={0.7}>
+            <TouchableOpacity style={s.qtyBtn} onPress={handleRemoveFromCart} activeOpacity={0.7}>
               <Icon name="remove" size={16} color="#fff" />
             </TouchableOpacity>
-            <Text style={s.qtyText}>{qty}</Text>
-            <TouchableOpacity style={s.qtyBtn} onPress={() => addItem(item)} activeOpacity={0.7}>
+            <Animated.Text style={[s.qtyText, { transform: [{ scale: qtyBounce }] }]}>{qty}</Animated.Text>
+            <TouchableOpacity style={s.qtyBtn} onPress={handleIncrement} activeOpacity={0.7}>
               <Icon name="add" size={16} color="#fff" />
             </TouchableOpacity>
           </View>
         ) : (
-          <TouchableOpacity
-            style={s.addBtn}
-            onPress={() => addItem(item)}
-            activeOpacity={0.8}
-          >
+          <TouchableOpacity style={s.addBtn} onPress={handleAddToCart} activeOpacity={0.8}>
             <Text style={s.addBtnText}>ADD</Text>
           </TouchableOpacity>
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
 
@@ -493,7 +626,7 @@ const HomeScreen = ({ onTabSwitch }) => {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [showAddressModal, setShowAddressModal] = useState(false);
-  const [selectedAddress, setSelectedAddress] = useState(null);
+  const { addressDisplayText, addressSubText, nearestStore, selectAddress } = useAddress();
   const [homeSections, setHomeSections] = useState([]);
   const [sectionsLoading, setSectionsLoading] = useState(true);
 
@@ -541,22 +674,6 @@ const HomeScreen = ({ onTabSwitch }) => {
 
   useEffect(() => () => { snowCancelledRef.current = true; snowAnims.forEach(a => a.stopAnimation()); }, [snowAnims]);
 
-  // ── Fetch address ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    (async () => {
-      try {
-        const token = await AsyncStorage.getItem('token');
-        if (!token) return;
-        const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-        const addrRes = await fetch(`${BASE_URL}/addresses/default`, { headers }).then(r => r.json()).catch(() => ({ success: false }));
-        if (addrRes.success && addrRes.data) {
-          const a = addrRes.data;
-          setSelectedAddress(`${(a.addressType || 'home').toUpperCase()} — ${a.fullName}`);
-        }
-      } catch (e) { /* use default */ }
-    })();
-  }, []);
-
   // ── Fetch dynamic home sections from API ─────────────────────────────
   useEffect(() => {
     (async () => {
@@ -574,9 +691,20 @@ const HomeScreen = ({ onTabSwitch }) => {
                 productKey: p.productKey,
                 name: p.name,
                 price: p.price,
+                discountPrice: p.discountPrice,
+                discountPercentage: p.discountPercentage,
                 unit: p.unit,
                 badge: p.badge,
-                imageUrl: p.imageUrl,
+                description: p.description,
+                imageUrl: p.images?.length
+                  ? p.images.sort((a, b) => a.order - b.order)[0].url
+                  : (p.imageUrl || ''),
+                images: (p.images || []).sort((a, b) => a.order - b.order),
+                stock: p.stock,
+                isOutOfStock: p.isOutOfStock,
+                brand: p.brand,
+                category: p.category?.name || p.category || '',
+                weight: p.weight,
               })),
             }))
           );
@@ -590,6 +718,25 @@ const HomeScreen = ({ onTabSwitch }) => {
   }, []);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
+  const handleProductPress = useCallback((item) => {
+    const localImg = IMAGE_MAP[item.productKey];
+    const serverImg = item.imageUrl ? { uri: resolveImageUrl(item.imageUrl) } : null;
+    const resolvedImages = (item.images || []).map(img => ({
+      ...img,
+      uri: resolveImageUrl(img.url),
+    }));
+    navigation.navigate('ProductDetailScreen', {
+      product: {
+        ...item,
+        id: item.productKey || item._id,
+        image: localImg || serverImg,
+        images: resolvedImages,
+      },
+      categoryName: item.category || 'Vegetables & Fruits',
+      products: [],
+    });
+  }, [navigation]);
+
   const handleCategoryPress = useCallback((name) => {
     if (selectedCategory === name) return;
     isSnowRunningRef.current = false;
@@ -603,9 +750,16 @@ const HomeScreen = ({ onTabSwitch }) => {
   }, [selectedCategory, snowAnims]);
 
   const handleAddressSelect = (data) => {
-    if (data.type === 'current') { setSelectedAddress('Current Location'); navigation.navigate('MapSelection', { latitude: data.latitude, longitude: data.longitude }); }
-    else if (data.type === 'new') navigation.navigate('MapSelection');
-    else if (data.type === 'saved') { const a = data.address; setSelectedAddress(`${(a.addressType || 'home').toUpperCase()} — ${a.fullName}`); }
+    if (data.type === 'current') {
+      selectAddress(null);
+      navigation.navigate('MapSelection', { type: 'current' });
+    } else if (data.type === 'new') {
+      navigation.navigate('MapSelection');
+    } else if (data.type === 'search') {
+      navigation.navigate('MapSelection', { latitude: data.latitude, longitude: data.longitude });
+    } else if (data.type === 'saved') {
+      selectAddress(data.address);
+    }
   };
 
   const handleBannerPress = useCallback((banner) => {
@@ -676,14 +830,20 @@ const HomeScreen = ({ onTabSwitch }) => {
               <View style={s.deliveryBlock}>
                 <View style={s.deliveryTimeRow}>
                   <Text style={s.deliveryMins}>15 minutes</Text>
+                  {nearestStore ? (
                   <View style={s.deliveryBadge}>
                     <Icon name="car-outline" size={11} color={accent} />
-                    <Text style={[s.deliveryBadgeText, { color: accent }]}>1 km away</Text>
+                    <Text style={[s.deliveryBadgeText, { color: accent }]}>
+                      {nearestStore.distance < 1
+                        ? `${Math.round(nearestStore.distance * 1000)}m`
+                        : `${nearestStore.distance.toFixed(1)} km`} away
+                    </Text>
                   </View>
+                  ) : null}
                 </View>
                 <TouchableOpacity style={s.addressRow} onPress={() => setShowAddressModal(true)} activeOpacity={0.8}>
                   <Icon name="location-sharp" size={13} color="#555" />
-                  <Text style={s.addressText} numberOfLines={1}>{selectedAddress || 'Select delivery address'}</Text>
+                  <Text style={s.addressText} numberOfLines={1}>{addressDisplayText}{addressSubText ? ` — ${addressSubText}` : ''}</Text>
                   <Icon name="chevron-down" size={13} color="#555" />
                 </TouchableOpacity>
               </View>
@@ -748,7 +908,7 @@ const HomeScreen = ({ onTabSwitch }) => {
         {isAll && homeSections.map((sec) => (
           <View key={sec._id} style={s.section}>
             <SectionHeader title={sec.title} subtitle={sec.subtitle} onSeeAll={() => onTabSwitch?.('Categories')} />
-            <FlatList data={sec.products} renderItem={({ item }) => <ProductCard item={item} cardWidth={productW} />}
+            <FlatList data={sec.products} renderItem={({ item }) => <ProductCard item={item} cardWidth={productW} onPress={handleProductPress} />}
               keyExtractor={i => i._id} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.productScroll} />
           </View>
         ))}
@@ -757,7 +917,7 @@ const HomeScreen = ({ onTabSwitch }) => {
         {isAll && sectionsLoading && ALL_PRODUCTS_SECTIONS.slice(0, 3).map((sec, idx) => (
           <View key={`fallback-${idx}`} style={s.section}>
             <SectionHeader title={sec.title} subtitle={sec.subtitle} />
-            <FlatList data={sec.products} renderItem={({ item }) => <ProductCard item={item} cardWidth={productW} />}
+            <FlatList data={sec.products} renderItem={({ item }) => <ProductCard item={item} cardWidth={productW} onPress={handleProductPress} />}
               keyExtractor={i => i._id} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.productScroll} />
           </View>
         ))}
@@ -872,12 +1032,16 @@ const s = StyleSheet.create({
   productName: { fontSize: 12, fontWeight: '500', color: COLORS.ink, lineHeight: 16, height: 33, marginBottom: 6 },
   productPriceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 5, marginBottom: 8 },
   productPrice: { fontSize: 15, fontWeight: '700', color: COLORS.ink },
+  productOrigPrice: { fontSize: 11, color: '#B0B0B0', textDecorationLine: 'line-through', fontWeight: '500' },
   productUnit: { fontSize: 11, color: COLORS.textMuted },
   addBtn: { height: 32, borderRadius: 9, borderWidth: 1.5, borderColor: COLORS.green, justifyContent: 'center', alignItems: 'center', backgroundColor: '#FFFFFF' },
   addBtnText: { fontSize: 12, fontWeight: '800', color: COLORS.green, letterSpacing: 0.5 },
   qtyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 32, borderRadius: 9, backgroundColor: COLORS.green, overflow: 'hidden' },
   qtyBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
   qtyText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF', minWidth: 20, textAlign: 'center' },
+  carouselDots: { position: 'absolute', bottom: 6, alignSelf: 'center', flexDirection: 'row', gap: 4, zIndex: 5 },
+  carouselDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: 'rgba(0,0,0,0.15)' },
+  carouselDotActive: { backgroundColor: 'rgba(0,0,0,0.5)', width: 7 },
   freqGrid: { gap: 8 },
   freqRow: { flexDirection: 'row', justifyContent: 'space-between' },
   freqCard: { backgroundColor: COLORS.card, borderRadius: 16, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 10, borderWidth: 0.5, borderColor: COLORS.border, position: 'relative' },

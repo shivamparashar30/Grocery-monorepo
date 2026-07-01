@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { BASE_URL } from '../../config/apiconfig';
+import { useSocket } from '../../context/SocketContext';
 
 const ORDERS_API = `${BASE_URL}/orders`;
 
@@ -58,16 +60,27 @@ const getTimeAgo = (dateStr) => {
 };
 
 // ── Order Card ───────────────────────────────────────────────────────────────
-const OrderCard = ({ order, onUpdateStatus }) => {
+const OrderCard = ({ order, onUpdateStatus, onPress }) => {
   const meta = STATUS_META[order.status] || STATUS_META.pending;
   const nextStatus = NEXT_STATUS[order.status];
   const date = new Date(order.createdAt);
 
   return (
-    <View style={styles.card}>
+    <TouchableOpacity
+      style={[styles.card, order.status === 'pending' && styles.cardPending]}
+      onPress={onPress}
+      activeOpacity={0.7}
+    >
       <View style={styles.cardTop}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.orderId}>#{order._id?.slice(-8).toUpperCase()}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={styles.orderId}>#{order._id?.slice(-8).toUpperCase()}</Text>
+            {order.status === 'pending' && (
+              <View style={styles.newBadge}>
+                <Text style={styles.newBadgeText}>NEW</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.orderTime}>{getTimeAgo(order.createdAt)}</Text>
         </View>
         <View style={[styles.statusPill, { backgroundColor: meta.bg }]}>
@@ -118,17 +131,18 @@ const OrderCard = ({ order, onUpdateStatus }) => {
           </TouchableOpacity>
         )}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
 
 // ── Main ─────────────────────────────────────────────────────────────────────
-const AdminOrdersScreen = () => {
+const AdminOrdersScreen = ({ navigation }) => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeFilter, setActiveFilter] = useState('All');
   const [search, setSearch] = useState('');
+  const socket = useSocket();
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -147,6 +161,43 @@ const AdminOrdersScreen = () => {
   }, []);
 
   useEffect(() => { fetchOrders(); }, []);
+
+  // Auto-refresh when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
+    }, [])
+  );
+
+  // Socket: listen for new orders and status updates
+  useEffect(() => {
+    if (!socket) return;
+
+    const unsub1 = socket.on('order:new', (data) => {
+      if (data.order) {
+        setOrders((prev) => [data.order, ...prev]);
+      }
+    });
+
+    const unsub2 = socket.on('order:status-updated', (data) => {
+      setOrders((prev) =>
+        prev.map((o) => (o._id === data.orderId ? { ...o, status: data.status } : o))
+      );
+    });
+
+    const unsub3 = socket.on('delivery:assigned', (data) => {
+      // Refresh to get latest state when a delivery is assigned
+      if (data.orderId) {
+        fetchOrders();
+      }
+    });
+
+    return () => {
+      unsub1();
+      unsub2();
+      unsub3();
+    };
+  }, [socket]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -293,7 +344,11 @@ const AdminOrdersScreen = () => {
         data={displayed}
         keyExtractor={(item) => item._id}
         renderItem={({ item }) => (
-          <OrderCard order={item} onUpdateStatus={updateOrderStatus} />
+          <OrderCard
+            order={item}
+            onUpdateStatus={updateOrderStatus}
+            onPress={() => navigation.navigate('AdminOrderDetail', { orderId: item._id })}
+          />
         )}
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
@@ -387,6 +442,22 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 8,
     elevation: 3,
+  },
+  cardPending: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#F59E0B',
+  },
+  newBadge: {
+    backgroundColor: '#EF4444',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+  },
+  newBadgeText: {
+    color: '#FFF',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   cardTop: {
     flexDirection: 'row',

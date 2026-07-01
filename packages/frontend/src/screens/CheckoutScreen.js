@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/Ionicons';
-import { BASE_URL } from '../config/apiconfig';
+import { BASE_URL, resolveImageUrl } from '../config/apiconfig';
 import { useCart } from '../context/CartContext';
 import AddressSelectionModal from './Homescreen/AddressSelectionModal';
 import { CommonActions } from '@react-navigation/native';
@@ -290,13 +290,15 @@ const CheckoutScreen = ({ navigation }) => {
         const product = item.product;
         const productId = product?._id;
         const localImage = IMAGE_MAP[product?.productKey];
+        const remoteImage = product?.imageUrl ? { uri: resolveImageUrl(product.imageUrl) } : null;
+        const imageSource = localImage || remoteImage;
         const unit = PRODUCT_UNIT_MAP[productId] ?? '';
 
         return (
             <View style={styles.cartItem}>
                 <View style={styles.itemImageWrap}>
-                    {localImage ? (
-                        <Image source={localImage} style={styles.itemImage} resizeMode="contain" />
+                    {imageSource ? (
+                        <Image source={imageSource} style={styles.itemImage} resizeMode="contain" />
                     ) : (
                         <View style={[styles.itemImageWrap, { backgroundColor: '#EEE' }]} />
                     )}

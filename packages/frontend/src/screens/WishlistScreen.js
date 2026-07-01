@@ -16,6 +16,7 @@ import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 import { useWishlist } from '../context/WishlistContext';
 import { useCart } from '../context/CartContext';
 import IMAGE_MAP from '../utils/imageMap';
+import { resolveImageUrl } from '../config/apiconfig';
 
 const PLACEHOLDER_COLORS = [
   '#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FFEAA7',
@@ -46,7 +47,7 @@ const WishlistItem = ({ item, onRemove, onAddToCart }) => {
   const [imgError, setImgError] = useState(false);
   const localImg = IMAGE_MAP[item.productKey];
   const hasUrl = !imgError && item.imageUrl;
-  const imageSource = localImg || (hasUrl ? { uri: item.imageUrl } : null);
+  const imageSource = localImg || (hasUrl ? { uri: resolveImageUrl(item.imageUrl) } : null);
   const bg = getColor(item.name);
 
   return (

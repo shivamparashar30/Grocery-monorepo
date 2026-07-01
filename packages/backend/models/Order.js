@@ -6,38 +6,13 @@ const OrderItemSchema = new mongoose.Schema({
     ref: 'Product',
     required: true,
   },
-
-  productKey: {
-    type: String,
-  },
-
-  name: {
-    type: String,
-    required: true,
-  },
-
-  quantity: {
-    type: Number,
-    required: true,
-  },
-
-  price: {
-    type: Number,
-    required: true,
-  },
-
-  unit: {
-    type: String,
-  },
-
-  category: {
-    type: String,
-  },
-
-  image: {
-    type: String,
-    default: '',
-  },
+  productKey: { type: String },
+  name: { type: String, required: true },
+  quantity: { type: Number, required: true },
+  price: { type: Number, required: true },
+  unit: { type: String },
+  category: { type: String },
+  image: { type: String, default: '' },
 });
 
 const OrderSchema = new mongoose.Schema(
@@ -53,10 +28,14 @@ const OrderSchema = new mongoose.Schema(
       city: { type: String },
       postalCode: { type: String },
       country: { type: String },
+      location: {
+        lat: { type: Number },
+        lng: { type: Number },
+      },
     },
     paymentMethod: {
       type: String,
-      default: 'COD', // Cash on Delivery
+      default: 'COD',
     },
     paymentResult: {
       id: { type: String },
@@ -64,45 +43,22 @@ const OrderSchema = new mongoose.Schema(
       updateTime: { type: String },
       emailAddress: { type: String },
     },
-    itemsPrice: {
-      type: Number,
-      default: 0,
-    },
-    taxPrice: {
-      type: Number,
-      default: 0,
-    },
-    shippingPrice: {
-      type: Number,
-      default: 0,
-    },
-    totalPrice: {
-      type: Number,
-      default: 0,
-    },
+    itemsPrice: { type: Number, default: 0 },
+    taxPrice: { type: Number, default: 0 },
+    shippingPrice: { type: Number, default: 0 },
+    totalPrice: { type: Number, default: 0 },
     status: {
       type: String,
       enum: ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'],
       default: 'pending',
     },
-    isPaid: {
-      type: Boolean,
-      default: false,
-    },
-    paidAt: {
-      type: Date,
-    },
-    isDelivered: {
-      type: Boolean,
-      default: false,
-    },
-    deliveredAt: {
-      type: Date,
-    },
+    orderNotes: { type: String, default: '' },
+    isPaid: { type: Boolean, default: false },
+    paidAt: { type: Date },
+    isDelivered: { type: Boolean, default: false },
+    deliveredAt: { type: Date },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 module.exports = mongoose.model('Order', OrderSchema);

@@ -16,6 +16,7 @@ import PaymentMethodsScreen from '../screens/ProfileScreens/PaymentMethodsScreen
 import MyAddressesScreen from '../screens/ProfileScreens/MyAddressesScreen';
 import AddPaymentMethodScreen from '../screens/ProfileScreens/AddPaymentMethodScreen';
 import OrderHistoryScreen from '../screens/ProfileScreens/OrderHistoryScreen';
+import OrderDetailsScreen from '../screens/ProfileScreens/OrderDetailsScreen';
 import MapSelectionScreen from '../screens/Homescreen/Mapselectionscreen';
 import WishlistScreen from '../screens/WishlistScreen';
 import BottomTabNavigator from '../navigation/BottomTabNavigator';
@@ -88,6 +89,11 @@ const AppNavigator = () => {
         />
 
         <Stack.Screen
+          name="OrderDetails"
+          component={OrderDetailsScreen}
+        />
+
+        <Stack.Screen
           name="Settings"
           component={SettingsScreen}
         />
@@ -132,13 +138,8 @@ const AppNavigator = () => {
           name="MapSelection"
           component={MapSelectionScreen}
           options={{
-            headerShown: true,
-            headerTitle: 'Select Location',
-            headerBackTitle: 'Back',
+            headerShown: false,
             presentation: 'modal',
-            headerStyle: { backgroundColor: '#F5F5F5' },
-            headerTitleStyle: { fontSize: 18, fontWeight: '600' },
-            headerTintColor: '#1A1A1A',
           }}
         />
     </Stack.Navigator>

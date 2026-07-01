@@ -443,15 +443,13 @@ class NotificationService {
       try {
         const messaging = this._getMessaging();
         if (messaging) {
-          // Foreground messages
+          // Foreground messages — handle both notification+data and data-only
           messaging().onMessage(async (remoteMessage) => {
             const { notification, data } = remoteMessage;
-            if (notification) {
-              await this.displayNotification(
-                notification.title || 'New Notification',
-                notification.body || '',
-                data || {}
-              );
+            const title = notification?.title || data?.title || 'New Notification';
+            const body = notification?.body || data?.body || '';
+            if (title || body) {
+              await this.displayNotification(title, body, data || {});
             }
           });
 
@@ -482,12 +480,6 @@ class NotificationService {
           this.handleNotificationAction(detail.notification);
         }
       });
-
-      notifee.onBackgroundEvent(async ({ type, detail }) => {
-        if (type === EventType.PRESS) {
-          console.log('[Notifications] Background notification pressed:', detail);
-        }
-      });
     } catch (error) {
       console.warn('[Notifications] Notifee event handler error:', error?.message);
     }
@@ -499,6 +491,12 @@ class NotificationService {
   handleNotificationAction(notification) {
     const data = notification?.data || {};
     console.log('[Notifications] Action received:', data);
+
+    if (data.screen) {
+      // Lazy-require to avoid circular dependency
+      const { navigateFromNotification } = require('../navigation/navigationRef');
+      navigateFromNotification(data);
+    }
   }
 
   // ─── Topic Subscriptions (Android only) ───────────────────────────────────

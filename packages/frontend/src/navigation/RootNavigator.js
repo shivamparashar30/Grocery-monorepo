@@ -8,8 +8,9 @@ import AuthNavigator from './AuthNavigator';
 import AppNavigator from './AppNavigator';
 import AdminNavigator from './AdminNavigator';
 import DriverNavigator from './DriverNavigator';
-import { navigationRef } from './navigationRef';
+import { navigationRef, processPendingNavigation } from './navigationRef';
 import FloatingCart from '../components/FloatingCart';
+import { AddressProvider } from '../context/AddressContext';
 
 const RootNavigator = () => {
   const { isAuthenticated, isInitialized } = useSelector((state) => state.auth);
@@ -35,12 +36,16 @@ const RootNavigator = () => {
     switch (role) {
       case 'admin':  return <AdminNavigator />;
       case 'driver': return <DriverNavigator />;
-      default:       return <AppNavigator />;
+      default:       return <AddressProvider><AppNavigator /></AddressProvider>;
     }
   };
 
   return (
-    <NavigationContainer ref={navigationRef} onStateChange={onStateChange}>
+    <NavigationContainer
+      ref={navigationRef}
+      onStateChange={onStateChange}
+      onReady={processPendingNavigation}
+    >
       {isAuthenticated ? getAppNavigator() : <AuthNavigator />}
       {isUser && <FloatingCart currentRoute={currentRoute} />}
     </NavigationContainer>

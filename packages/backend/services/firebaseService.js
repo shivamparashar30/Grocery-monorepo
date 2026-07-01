@@ -31,7 +31,7 @@ const initializeFirebase = () => {
         return;
       }
     }
-    
+
     firebaseInitialized = true;
     console.log('Firebase Admin SDK initialized successfully');
   } catch (error) {
@@ -44,20 +44,15 @@ initializeFirebase();
 
 /**
  * Send push notification to multiple devices
- * @param {Array<string>} tokens - Array of FCM tokens
- * @param {string} title - Notification title
- * @param {string} body - Notification body
- * @param {Object} data - Additional data payload
- * @returns {Promise}
+ * Uses DATA-ONLY messages so the app's background handler always fires
+ * and notifee displays the notification properly in all states.
  */
 const sendPushNotification = async (tokens, title, body, data = {}) => {
   try {
-    // Ensure Firebase is initialized
     if (!firebaseInitialized) {
       initializeFirebase();
     }
 
-    // Filter out invalid tokens
     const validTokens = tokens.filter(token => token && token.length > 0);
 
     if (validTokens.length === 0) {
@@ -75,43 +70,52 @@ const sendPushNotification = async (tokens, title, body, data = {}) => {
       stringifiedData[key] = String(data[key]);
     });
 
-    // Create message
+    // DATA-ONLY message — no "notification" field
+    // This ensures the background handler ALWAYS fires on Android,
+    // giving notifee full control to display the notification.
     const message = {
-      notification: {
+      data: {
+        ...stringifiedData,
         title,
         body,
+        notifee: JSON.stringify({
+          title,
+          body,
+          android: {
+            channelId: stringifiedData.type === 'order' ? 'orders' : stringifiedData.type === 'offer' ? 'offers' : 'default',
+            importance: 4, // AndroidImportance.HIGH
+            pressAction: { id: 'default', launchActivity: 'default' },
+            sound: 'default',
+            vibrationPattern: [300, 500],
+            smallIcon: 'ic_notification',
+          },
+        }),
       },
-      data: stringifiedData,
       android: {
         priority: 'high',
-        notification: {
-          sound: 'default',
-          channelId: 'default',
-          priority: 'high',
-        },
+        ttl: 86400000, // 24 hours
       },
       apns: {
         payload: {
           aps: {
             sound: 'default',
             badge: 1,
+            'content-available': 1,
           },
         },
       },
       tokens: validTokens,
     };
 
-    // Send notification
     const response = await admin.messaging().sendEachForMulticast(message);
 
-    console.log('✅ Successfully sent notifications:', response.successCount);
-    console.log('❌ Failed notifications:', response.failureCount);
+    console.log('Successfully sent notifications:', response.successCount);
+    console.log('Failed notifications:', response.failureCount);
 
-    // Log failures
     if (response.failureCount > 0) {
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
-          console.error(`Failed to send to token ${validTokens[idx]}:`, resp.error);
+          console.error(`Failed to send to token ${validTokens[idx]}:`, resp.error?.message);
         }
       });
     }
@@ -122,7 +126,7 @@ const sendPushNotification = async (tokens, title, body, data = {}) => {
       failureCount: response.failureCount,
     };
   } catch (error) {
-    console.error('❌ Error sending push notification:', error);
+    console.error('Error sending push notification:', error);
     console.error('Error details:', error.message);
     throw error;
   }
@@ -144,15 +148,17 @@ const sendToTopic = async (topic, title, body, data = {}) => {
       initializeFirebase();
     }
 
-    // Convert data to strings
     const stringifiedData = {};
     Object.keys(data).forEach(key => {
       stringifiedData[key] = String(data[key]);
     });
 
     const message = {
-      notification: { title, body },
-      data: stringifiedData,
+      data: {
+        ...stringifiedData,
+        title,
+        body,
+      },
       topic,
     };
 

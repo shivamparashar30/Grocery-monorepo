@@ -6,6 +6,8 @@ const { protect, authorize } = require('../middleware/auth');
 const {
   getDeliveries,
   getMyDeliveries,
+  getAvailableOrders,
+  acceptDelivery,
   getDelivery,
   getDeliveryByOrder,
   trackDelivery,
@@ -13,41 +15,32 @@ const {
   updateDeliveryStatus,
   updateLocation,
   assignDeliveryBoy,
+  verifyPickupOtp,
   updateProofOfDelivery,
   rateDelivery,
   getDeliveryStats,
 } = require('../controller/Deliverycontroller');
 
-// ============================================
-// PUBLIC (no login needed)
-// ============================================
+// PUBLIC
 router.get('/track/:trackingNumber', trackDelivery);
 
-// ============================================
-// ADMIN ROUTES
-// ✅ These must come BEFORE /:id
-// ============================================
+// ADMIN
 router.get('/stats', protect, authorize('admin'), getDeliveryStats);
 router.get('/', protect, authorize('admin'), getDeliveries);
 router.post('/', protect, authorize('admin'), createDelivery);
 router.put('/:id/assign', protect, authorize('admin'), assignDeliveryBoy);
 
-// ============================================
-// DRIVER ROUTES
-// ✅ /my-deliveries must come BEFORE /:id
-// ============================================
+// DRIVER
 router.get('/my-deliveries', protect, authorize('driver'), getMyDeliveries);
+router.get('/available', protect, authorize('driver'), getAvailableOrders);
+router.put('/:id/accept', protect, authorize('driver'), acceptDelivery);
+router.put('/:id/verify-otp', protect, authorize('driver', 'admin'), verifyPickupOtp);
 router.put('/:id/status', protect, authorize('admin', 'driver'), updateDeliveryStatus);
 router.put('/:id/location', protect, authorize('admin', 'driver'), updateLocation);
 router.put('/:id/proof', protect, authorize('admin', 'driver'), updateProofOfDelivery);
 
-// ============================================
-// DYNAMIC ROUTES — always last
-// ✅ /:id goes here at the BOTTOM
-// because it would swallow /stats and /my-deliveries
-// if placed higher up
-// ============================================
-router.get('/order/:orderId', protect, getDeliveryByOrder);
+// DYNAMIC — must be last
+router.get('/order/:orderId', protect, authorize('user', 'admin'), getDeliveryByOrder);
 router.get('/:id', protect, getDelivery);
 router.put('/:id/rate', protect, authorize('user'), rateDelivery);
 

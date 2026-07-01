@@ -12,6 +12,10 @@ const addressSchema = new mongoose.Schema(
       enum: ['home', 'work', 'other'],
       default: 'home',
     },
+    customTag: {
+      type: String,
+      maxlength: [30, 'Tag should not exceed 30 characters'],
+    },
     fullName: {
       type: String,
       required: [true, 'Please provide full name'],

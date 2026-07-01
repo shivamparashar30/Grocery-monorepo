@@ -1,299 +1,246 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  TextInput,
-  ScrollView,
-  Dimensions,
-  Platform,
-  PermissionsAndroid,
-  KeyboardAvoidingView,
-  Alert,
+  View, Text, StyleSheet, Modal, TouchableOpacity, TextInput,
+  ScrollView, Dimensions, Platform, KeyboardAvoidingView,
+  ActivityIndicator, Keyboard,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/Ionicons';
-import MaterialCommunityIcons from 'react-native-vector-icons/MaterialCommunityIcons';
-import { BASE_URL } from '../../config/apiconfig';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useAddress } from '../../context/AddressContext';
 
-const { width, height } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
+
+const TAG_ICONS = { home: 'home', work: 'briefcase', other: 'location' };
+const TAG_COLORS = { home: '#3B82F6', work: '#8B5CF6', other: '#6B7280' };
 
 const AddressSelectionModal = ({ visible, onClose, onAddressSelect }) => {
+  const { savedAddresses, fetchSavedAddresses, userLocation } = useAddress();
   const [searchQuery, setSearchQuery] = useState('');
-  const [savedAddresses, setSavedAddresses] = useState([]);
-  const [loadingAddresses, setLoadingAddresses] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const searchTimerRef = useRef(null);
 
   useEffect(() => {
-    if (visible) fetchSavedAddresses();
-  }, [visible]);
-
-  const getAuthHeaders = async () => {
-    const token = await AsyncStorage.getItem('token');
-    return {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    };
-  };
-
-
-  const fetchSavedAddresses = async () => {
-    try {
-      setLoadingAddresses(true);
-      const headers = await getAuthHeaders();
-      const response = await fetch(`${BASE_URL}/addresses`, {
-        headers,
-      });
-      const data = await response.json();
-      if (data.success) setSavedAddresses(data.data);
-    } catch (err) {
-      console.error('Failed to fetch addresses:', err);
-    } finally {
-      setLoadingAddresses(false);
+    if (visible) {
+      fetchSavedAddresses();
+      setSearchQuery('');
+      setSearchResults([]);
     }
-  };
+  }, [visible, fetchSavedAddresses]);
 
-  const requestLocationPermission = async () => {
-    if (Platform.OS === 'android') {
+  const handleSearch = useCallback((text) => {
+    setSearchQuery(text);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (text.length < 3) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    searchTimerRef.current = setTimeout(async () => {
       try {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          {
-            title: 'Location Permission',
-            message: 'This app needs access to your location to show nearby delivery options.',
-            buttonNeutral: 'Ask Me Later',
-            buttonNegative: 'Cancel',
-            buttonPositive: 'OK',
-          }
-        );
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
-      } catch (err) {
-        console.warn('Permission error:', err);
-        return false;
-      }
-    }
-    return true;
+        // Build location-biased search URL
+        const refLat = userLocation?.latitude;
+        const refLng = userLocation?.longitude;
+        let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(text)}&countrycodes=in&limit=8&addressdetails=1`;
+
+        if (refLat && refLng) {
+          const delta = 0.5; // ~50km bias box
+          const viewbox = `${refLng - delta},${refLat + delta},${refLng + delta},${refLat - delta}`;
+          url += `&viewbox=${viewbox}&bounded=0`;
+        }
+
+        const res = await fetch(url, {
+          headers: { 'Accept-Language': 'en', 'User-Agent': 'GroceryApp/1.0' },
+        });
+        const data = await res.json();
+
+        // Sort by distance from user (nearby first)
+        if (data?.length && refLat && refLng) {
+          data.sort((a, b) => {
+            const dA = Math.abs(parseFloat(a.lat) - refLat) + Math.abs(parseFloat(a.lon) - refLng);
+            const dB = Math.abs(parseFloat(b.lat) - refLat) + Math.abs(parseFloat(b.lon) - refLng);
+            return dA - dB;
+          });
+        }
+
+        setSearchResults((data || []).slice(0, 5));
+      } catch {}
+      setSearching(false);
+    }, 500);
+  }, [userLocation]);
+
+  const handleSelectSearchResult = (result) => {
+    onAddressSelect({
+      type: 'search',
+      latitude: parseFloat(result.lat),
+      longitude: parseFloat(result.lon),
+      displayName: result.display_name,
+    });
+    onClose();
   };
 
-  const handleUseCurrentLocation = async () => {
-    try {
-      const hasPermission = await requestLocationPermission();
-
-      if (hasPermission) {
-        // Just pass the type, let MapSelectionScreen handle getting location
-        onAddressSelect({
-          type: 'current',
-        });
-        onClose();
-      } else {
-        Alert.alert(
-          'Permission Required',
-          'Location permission is required to use this feature. Please enable it in your device settings.',
-          [{ text: 'OK' }]
-        );
-      }
-    } catch (error) {
-      console.error('Location permission error:', error);
-      Alert.alert('Error', 'Failed to request location permission. Please try again.');
-    }
+  const handleUseCurrentLocation = () => {
+    onAddressSelect({ type: 'current' });
+    onClose();
   };
 
   const handleAddNewAddress = () => {
-    try {
-      onAddressSelect({ type: 'new', fullName: '', phone: '', });
-      onClose();
-    } catch (error) {
-      console.error('Navigation error:', error);
-      Alert.alert('Error', 'Failed to open map screen. Please try again.');
-    }
+    onAddressSelect({ type: 'new' });
+    onClose();
   };
 
-  const handleSelectAddress = (address) => {
-    try {
-      onAddressSelect({
-        type: 'saved',
-        address,
-      });
-      onClose();
-    } catch (error) {
-      console.error('Address selection error:', error);
-    }
+  const handleSelectSaved = (address) => {
+    onAddressSelect({ type: 'saved', address });
+    onClose();
   };
 
-  const handleImportFromZomato = () => {
-    Alert.alert('Coming Soon', 'Import from Zomato feature will be available soon!');
-  };
-
-  const handleRequestAddress = () => {
-    Alert.alert('Coming Soon', 'Request address via WhatsApp feature will be available soon!');
-  };
+  const showSearchResults = searchQuery.length >= 3;
 
   return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="slide"
-      onRequestClose={onClose}
-    >
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.modalOverlay}
+        style={styles.overlay}
       >
-        {/* Touchable overlay to close modal */}
-        <TouchableOpacity
-          style={styles.overlayTouchable}
-          activeOpacity={1}
-          onPress={onClose}
-        />
+        <TouchableOpacity style={styles.overlayBg} activeOpacity={1} onPress={onClose} />
 
-        {/* Close button */}
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={onClose}
-          activeOpacity={0.7}
-        >
-          <View style={styles.closeButtonCircle}>
+        <TouchableOpacity style={styles.closeBtn} onPress={onClose} activeOpacity={0.7}>
+          <View style={styles.closeBtnCircle}>
             <Icon name="close" size={28} color="#FFF" />
           </View>
         </TouchableOpacity>
 
-        {/* Modal Content */}
-        <View style={styles.modalContent}>
-          {/* Header */}
-          <Text style={styles.modalTitle}>Select delivery location</Text>
+        <View style={styles.content}>
+          <Text style={styles.title}>Select delivery location</Text>
 
-          {/* Search Bar */}
-          <View style={styles.searchContainer}>
-            <Icon name="search" size={22} color="#666" />
+          {/* Search bar - FIXED at top, outside ScrollView */}
+          <View style={styles.searchBar}>
+            <Icon name="search" size={20} color="#999" />
             <TextInput
               style={styles.searchInput}
               placeholder="Search for area, street name..."
               placeholderTextColor="#999"
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={handleSearch}
+              returnKeyType="search"
             />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => { setSearchQuery(''); setSearchResults([]); }}>
+                <Icon name="close-circle" size={18} color="#CCC" />
+              </TouchableOpacity>
+            )}
           </View>
 
+          {/* Scrollable content below fixed search bar */}
           <ScrollView
-            style={styles.scrollContent}
+            style={styles.scroll}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
-            {/* Use Current Location */}
-            <TouchableOpacity
-              style={styles.optionItem}
-              onPress={handleUseCurrentLocation}
-              activeOpacity={0.7}
-            >
-              <View style={styles.optionLeft}>
-                <View style={[styles.optionIcon, styles.locationIcon]}>
-                  <Icon name="locate" size={24} color="#00C853" />
-                </View>
-                <Text style={styles.optionText}>Use your current location</Text>
-              </View>
-              <Icon name="chevron-forward" size={24} color="#666" />
-            </TouchableOpacity>
-
-            {/* Add New Address */}
-            <TouchableOpacity
-              style={styles.optionItem}
-              onPress={handleAddNewAddress}
-              activeOpacity={0.7}
-            >
-              <View style={styles.optionLeft}>
-                <View style={[styles.optionIcon, styles.addIcon]}>
-                  <Icon name="add" size={24} color="#00C853" />
-                </View>
-                <Text style={styles.optionText}>Add new address</Text>
-              </View>
-              <Icon name="chevron-forward" size={24} color="#666" />
-            </TouchableOpacity>
-
-            {/* Import from Zomato */}
-            <TouchableOpacity
-              style={styles.optionItem}
-              onPress={handleImportFromZomato}
-              activeOpacity={0.7}
-            >
-              <View style={styles.optionLeft}>
-                <View style={[styles.optionIcon, styles.zomatoIcon]}>
-                  <Text style={styles.zomatoText}>z</Text>
-                </View>
-                <Text style={styles.optionText}>Import your addresses from Zomato</Text>
-              </View>
-              <Icon name="chevron-forward" size={24} color="#666" />
-            </TouchableOpacity>
-
-            {/* Request Address from WhatsApp */}
-            <TouchableOpacity
-              style={styles.optionItem}
-              onPress={handleRequestAddress}
-              activeOpacity={0.7}
-            >
-              <View style={styles.optionLeft}>
-                <View style={[styles.optionIcon, styles.whatsappIcon]}>
-                  <MaterialCommunityIcons name="whatsapp" size={24} color="#FFF" />
-                </View>
-                <Text style={styles.optionText}>Request address from someone else</Text>
-              </View>
-              <Icon name="chevron-forward" size={24} color="#666" />
-            </TouchableOpacity>
-
-            {/* Saved Addresses Section */}
-            <Text style={styles.savedAddressesTitle}>Your saved addresses</Text>
-
-            {savedAddresses.map((address) => (
-              <TouchableOpacity
-                key={address._id}
-                style={styles.addressCard}
-                onPress={() => handleSelectAddress(address)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.addressLeft}>
-                  <View style={styles.homeIconContainer}>
-                    <Icon name="home" size={28} color="#FF9800" />
-                  </View>
-                  <View style={styles.addressInfo}>
-                    <View style={styles.addressHeader}>
-                      <Text style={styles.addressLabel}>
-                        {address.addressType?.charAt(0).toUpperCase() + address.addressType?.slice(1)}
-                      </Text>
-                      <Text style={styles.addressText}>{address.fullName}</Text>
+            {/* Search results */}
+            {showSearchResults && (
+              <View style={styles.searchSection}>
+                {searching && (
+                  <ActivityIndicator size="small" color="#2BB77D" style={{ marginVertical: 16 }} />
+                )}
+                {searchResults.map((result) => (
+                  <TouchableOpacity
+                    key={result.place_id}
+                    style={styles.searchResultItem}
+                    onPress={() => handleSelectSearchResult(result)}
+                  >
+                    <View style={styles.searchResultIcon}>
+                      <Icon name="location-outline" size={20} color="#2BB77D" />
                     </View>
-                    <Text style={styles.addressText} numberOfLines={2}>
-                      {[address.addressLine1, address.addressLine2, address.landmark, address.city, address.state, address.pincode]
-                        .filter(Boolean)
-                        .join(', ')}
+                    <Text style={styles.searchResultText} numberOfLines={2}>
+                      {result.display_name}
                     </Text>
-                    <Text style={styles.phoneText}>Phone number: {address.phone}</Text>
+                  </TouchableOpacity>
+                ))}
+                {!searching && searchResults.length === 0 && (
+                  <Text style={styles.noResults}>No results found</Text>
+                )}
+              </View>
+            )}
+
+            {/* Main options - show when NOT searching */}
+            {!showSearchResults && (
+              <>
+                {/* Use current location */}
+                <TouchableOpacity
+                  style={styles.optionRow}
+                  onPress={handleUseCurrentLocation}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.optionIcon, { backgroundColor: '#E8F5E9' }]}>
+                    <Icon name="locate" size={22} color="#2BB77D" />
                   </View>
-                </View>
+                  <Text style={styles.optionText}>Use your current location</Text>
+                  <Icon name="chevron-forward" size={20} color="#CCC" />
+                </TouchableOpacity>
 
-                <View style={styles.addressActions}>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      Alert.alert('Edit Address', 'Edit address feature coming soon!');
-                    }}
-                  >
-                    <Icon name="ellipsis-horizontal" size={20} color="#666" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      Alert.alert('Share Address', 'Share address feature coming soon!');
-                    }}
-                  >
-                    <Icon name="share-outline" size={20} color="#00C853" />
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-            ))}
+                {/* Add new address */}
+                <TouchableOpacity
+                  style={styles.optionRow}
+                  onPress={handleAddNewAddress}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.optionIcon, { backgroundColor: '#E8F5E9' }]}>
+                    <Icon name="add" size={22} color="#2BB77D" />
+                  </View>
+                  <Text style={styles.optionText}>Add new address</Text>
+                  <Icon name="chevron-forward" size={20} color="#CCC" />
+                </TouchableOpacity>
 
-            {/* Bottom spacing */}
-            <View style={styles.bottomSpacing} />
+                {/* Saved addresses */}
+                {savedAddresses.length > 0 && (
+                  <>
+                    <Text style={styles.sectionLabel}>YOUR SAVED ADDRESSES</Text>
+                    {savedAddresses.map((addr) => {
+                      const icon = TAG_ICONS[addr.addressType] || 'location';
+                      const color = TAG_COLORS[addr.addressType] || '#6B7280';
+                      const label =
+                        addr.customTag ||
+                        (addr.addressType === 'work'
+                          ? 'Office'
+                          : (addr.addressType || 'home').charAt(0).toUpperCase() +
+                            (addr.addressType || 'home').slice(1));
+
+                      return (
+                        <TouchableOpacity
+                          key={addr._id}
+                          style={styles.addrCard}
+                          onPress={() => handleSelectSaved(addr)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={[styles.addrIcon, { backgroundColor: color + '15' }]}>
+                            <Icon name={icon} size={22} color={color} />
+                          </View>
+                          <View style={styles.addrInfo}>
+                            <View style={styles.addrHeader}>
+                              <Text style={styles.addrLabel}>{label}</Text>
+                              {addr.isDefault && (
+                                <View style={styles.defaultBadge}>
+                                  <Text style={styles.defaultBadgeText}>Default</Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={styles.addrName}>{addr.fullName}</Text>
+                            <Text style={styles.addrText} numberOfLines={2}>
+                              {[addr.addressLine1, addr.city, addr.pincode]
+                                .filter(Boolean)
+                                .join(', ')}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </>
+                )}
+              </>
+            )}
+
+            <View style={{ height: 40 }} />
           </ScrollView>
         </View>
       </KeyboardAvoidingView>
@@ -302,205 +249,71 @@ const AddressSelectionModal = ({ visible, onClose, onAddressSelect }) => {
 };
 
 const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  overlayBg: { flex: 1 },
+  closeBtn: {
+    position: 'absolute', top: Platform.OS === 'ios' ? 60 : 40,
+    alignSelf: 'center', zIndex: 10,
   },
-  overlayTouchable: {
-    flex: 1,
+  closeBtnCircle: {
+    width: 52, height: 52, borderRadius: 26, backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center', alignItems: 'center',
   },
-  closeButton: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 60 : 40,
-    alignSelf: 'center',
-    zIndex: 10,
+  content: {
+    backgroundColor: '#F5F5F5', borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    height: height * 0.85, paddingTop: 24, paddingHorizontal: 20,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1, shadowRadius: 8, elevation: 10,
   },
-  closeButtonCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 8,
+  title: { fontSize: 22, fontWeight: '700', color: '#1A1A1A', marginBottom: 18 },
+  searchBar: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF',
+    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
+    marginBottom: 16, gap: 10,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05, shadowRadius: 3, elevation: 2,
   },
-  modalContent: {
-    backgroundColor: '#F5F5F5',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    height: height * 0.9,
-    paddingTop: 24,
-    paddingHorizontal: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 10,
+  searchInput: { flex: 1, fontSize: 15, color: '#1A1A1A', fontWeight: '500', padding: 0 },
+  scroll: { flex: 1 },
+  searchSection: { marginBottom: 12 },
+  searchResultItem: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF',
+    borderRadius: 12, padding: 14, marginBottom: 8, gap: 12,
   },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1A1A1A',
-    marginBottom: 20,
+  searchResultIcon: {
+    width: 36, height: 36, borderRadius: 18, backgroundColor: '#E8F5E9',
+    justifyContent: 'center', alignItems: 'center',
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1A1A1A',
-    marginLeft: 12,
-    fontWeight: '500',
-  },
-  scrollContent: {
-    flex: 1,
-  },
-  optionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  optionLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
+  searchResultText: { flex: 1, fontSize: 14, color: '#333', lineHeight: 20 },
+  noResults: { textAlign: 'center', color: '#999', fontSize: 14, paddingVertical: 20 },
+  optionRow: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF',
+    borderRadius: 12, padding: 14, marginBottom: 10, gap: 14,
   },
   optionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
+    width: 42, height: 42, borderRadius: 21,
+    justifyContent: 'center', alignItems: 'center',
   },
-  locationIcon: {
-    backgroundColor: '#E8F5E9',
+  optionText: { flex: 1, fontSize: 15, fontWeight: '600', color: '#1A1A1A' },
+  sectionLabel: {
+    fontSize: 12, fontWeight: '700', color: '#999',
+    marginTop: 20, marginBottom: 12, letterSpacing: 0.5,
   },
-  addIcon: {
-    backgroundColor: '#E8F5E9',
+  addrCard: {
+    flexDirection: 'row', backgroundColor: '#FFF', borderRadius: 12,
+    padding: 14, marginBottom: 10, gap: 12,
   },
-  zomatoIcon: {
-    backgroundColor: '#E23744',
+  addrIcon: {
+    width: 42, height: 42, borderRadius: 21,
+    justifyContent: 'center', alignItems: 'center',
   },
-  zomatoText: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#FFF',
-  },
-  whatsappIcon: {
-    backgroundColor: '#25D366',
-  },
-  optionText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1A1A1A',
-    flex: 1,
-  },
-  savedAddressesTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#999',
-    marginTop: 24,
-    marginBottom: 16,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  addressCard: {
-    backgroundColor: '#FFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  addressLeft: {
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  homeIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FFF3E0',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  addressInfo: {
-    flex: 1,
-  },
-  addressHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  addressLabel: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1A1A1A',
-  },
-  addressDistance: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#00BCD4',
-  },
-  addressText: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-    marginBottom: 6,
-  },
-  phoneText: {
-    fontSize: 13,
-    color: '#999',
-    fontWeight: '500',
-  },
-  addressActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 8,
-  },
-  actionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F5F5F5',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  bottomSpacing: {
-    height: 40,
-  },
+  addrInfo: { flex: 1 },
+  addrHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  addrLabel: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
+  defaultBadge: { backgroundColor: '#E8F5E9', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  defaultBadgeText: { fontSize: 11, fontWeight: '700', color: '#2BB77D' },
+  addrName: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 2 },
+  addrText: { fontSize: 13, color: '#888', lineHeight: 18 },
 });
 
 export default AddressSelectionModal;

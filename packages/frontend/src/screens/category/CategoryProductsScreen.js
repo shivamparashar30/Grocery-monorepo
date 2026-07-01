@@ -13,7 +13,7 @@ import { useCart } from '../../context/CartContext';
 import { useWishlist } from '../../context/WishlistContext';
 import Icon from 'react-native-vector-icons/Ionicons';
 import Icon1 from 'react-native-vector-icons/Entypo';
-import { BASE_URL } from '../../config/apiconfig';
+import { BASE_URL, resolveImageUrl } from '../../config/apiconfig';
 
 const BADGE_COLORS = {
     Fresh: { bg: '#E8F5E9', text: '#2E7D32' },
@@ -257,11 +257,19 @@ const CategoryProductsScreen = ({ route, navigation }) => {
             .finally(() => setLoading(false));
     }, [categoryName]);
 
-    const products = apiProducts.map(p => ({
-        ...p,
-        id: p.productKey,
-        image: IMAGE_MAP[p.productKey] || (p.imageUrl ? { uri: p.imageUrl } : null),
-    }));
+    const products = apiProducts.map(p => {
+        const localImg = IMAGE_MAP[p.productKey];
+        const serverImg = p.imageUrl ? { uri: resolveImageUrl(p.imageUrl) } : null;
+        const allImages = (p.images || [])
+            .sort((a, b) => a.order - b.order)
+            .map(img => ({ ...img, uri: resolveImageUrl(img.url) }));
+        return {
+            ...p,
+            id: p.productKey,
+            image: localImg || serverImg,
+            images: allImages,
+        };
+    });
 
     const handleAdd = useCallback((id) => {
         const product = products.find(p => p.id === id);

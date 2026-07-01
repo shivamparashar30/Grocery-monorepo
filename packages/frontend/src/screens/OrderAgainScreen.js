@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Feather from 'react-native-vector-icons/Feather';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCart } from '../context/CartContext';
-import { BASE_URL } from '../config/apiconfig';
+import { BASE_URL, resolveImageUrl } from '../config/apiconfig';
 
 const CATEGORY_META = {
   'Vegetables & Fruits': { light: '#E8F5E9' },
@@ -200,6 +200,12 @@ const FreqCategoryCard = ({
                 style={styles.freqImg}
                 resizeMode="contain"
               />
+            ) : item.imageUrl ? (
+              <Image
+                source={{ uri: resolveImageUrl(item.imageUrl) }}
+                style={styles.freqImg}
+                resizeMode="contain"
+              />
             ) : (
               <Text style={styles.freqFallback}>
                 {item.name?.[0] ?? '?'}
@@ -226,7 +232,7 @@ const PrevItemCard = ({
   onAdd,
   onRemove,
 }) => {
-  const image = IMAGE_MAP[item.productKey];
+  const image = IMAGE_MAP[item.productKey] || (item.imageUrl ? { uri: resolveImageUrl(item.imageUrl) } : null);
 
   return (
     <View style={styles.itemCard}>
